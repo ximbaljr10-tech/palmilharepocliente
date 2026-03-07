@@ -2,7 +2,59 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Product } from '../types';
 import { useCart } from '../CartContext';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, Loader2 } from 'lucide-react';
+
+function ProductCard({ product }: { product: Product }) {
+  const { addToCart } = useCart();
+  const [isAdding, setIsAdding] = useState(false);
+
+  const handleBuy = () => {
+    if (isAdding) return;
+    setIsAdding(true);
+    addToCart(product);
+    setTimeout(() => setIsAdding(false), 1000);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-zinc-100 overflow-hidden flex flex-col hover:shadow-md transition-shadow">
+      <Link to={`/product/${product.id}`} className="aspect-square bg-zinc-100 overflow-hidden">
+        {product.image_url ? (
+          <img
+            src={product.image_url}
+            alt={product.title}
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-zinc-400">
+            Sem imagem
+          </div>
+        )}
+      </Link>
+      <div className="p-3 sm:p-4 flex flex-col flex-grow">
+        <Link to={`/product/${product.id}`} className="font-medium text-sm sm:text-base text-zinc-900 hover:text-emerald-600 line-clamp-2 mb-2">
+          {product.title}
+        </Link>
+        <div className="mt-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
+          <span className="text-base sm:text-lg font-bold text-zinc-900">
+            R$ {product.price.toFixed(2).replace('.', ',')}
+          </span>
+          <button
+            onClick={handleBuy}
+            disabled={isAdding}
+            className={`px-3 py-2 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors w-full sm:w-auto flex items-center justify-center gap-2 ${
+              isAdding 
+                ? 'bg-emerald-700 text-white cursor-wait' 
+                : 'bg-zinc-900 text-white hover:bg-zinc-800'
+            }`}
+          >
+            {isAdding ? <Loader2 size={16} className="animate-spin" /> : 'Comprar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -10,7 +62,6 @@ export default function Home() {
   const [yardsOptions, setYardsOptions] = useState<number[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedYards, setSelectedYards] = useState<string>('');
-  const { addToCart } = useCart();
 
   useEffect(() => {
     fetch('/products.json')
@@ -45,7 +96,7 @@ export default function Home() {
   }, [searchQuery, selectedYards, allProducts]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">Nossos Produtos</h1>
         
@@ -85,41 +136,10 @@ export default function Home() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-6">
-        {products.map((product) => (
-          <div key={product.id} className="bg-white rounded-2xl shadow-sm border border-zinc-100 overflow-hidden flex flex-col hover:shadow-md transition-shadow">
-            <Link to={`/product/${product.id}`} className="aspect-square bg-zinc-100 overflow-hidden">
-              {product.image_url ? (
-                <img
-                  src={product.image_url}
-                  alt={product.title}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-zinc-400">
-                  Sem imagem
-                </div>
-              )}
-            </Link>
-            <div className="p-3 sm:p-4 flex flex-col flex-grow">
-              <Link to={`/product/${product.id}`} className="font-medium text-sm sm:text-base text-zinc-900 hover:text-emerald-600 line-clamp-2 mb-2">
-                {product.title}
-              </Link>
-              <div className="mt-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
-                <span className="text-base sm:text-lg font-bold text-zinc-900">
-                  R$ {product.price.toFixed(2).replace('.', ',')}
-                </span>
-                <button
-                  onClick={() => addToCart(product)}
-                  className="bg-zinc-900 text-white px-3 py-2 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-medium hover:bg-zinc-800 transition-colors w-full sm:w-auto"
-                >
-                  Comprar
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+          {products.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </div>
       )}
     </div>
   );

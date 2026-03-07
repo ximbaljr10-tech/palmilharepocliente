@@ -33,12 +33,22 @@ export default function ProductDetail() {
     );
   }
 
+  const [isAdding, setIsAdding] = useState(false);
+
   const handleBuy = () => {
+    if (isAdding) return;
+    setIsAdding(true);
+    
     // Add multiple items if quantity > 1
     for (let i = 0; i < quantity; i++) {
       addToCart(product);
     }
-    navigate('/cart');
+    
+    setTimeout(() => {
+      setIsAdding(false);
+      // Optional: don't navigate immediately so they can see the floating cart
+      // navigate('/cart');
+    }, 1000);
   };
 
   return (
@@ -114,9 +124,21 @@ export default function ProductDetail() {
 
             <button
               onClick={handleBuy}
-              className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20"
+              disabled={isAdding}
+              className={`w-full py-4 rounded-xl text-lg font-bold transition-all shadow-lg flex items-center justify-center gap-2 ${
+                isAdding 
+                  ? 'bg-emerald-700 text-white shadow-emerald-700/20 cursor-wait' 
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'
+              }`}
             >
-              Comprar Agora
+              {isAdding ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Adicionando...
+                </>
+              ) : (
+                'Comprar Agora'
+              )}
             </button>
           </div>
 

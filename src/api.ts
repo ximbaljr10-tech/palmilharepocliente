@@ -113,6 +113,17 @@ export const api = {
   },
 
   calculateShipping: async (cep: string, items: any[]) => {
+    const getDimensions = (item: any) => {
+      const title = item.title.toLowerCase();
+      if (title.includes('12000') || item.yards === 12000) return { height: 22, width: 22, length: 25, weight: 3.0 };
+      if (title.includes('6000') || item.yards === 6000) return { height: 19, width: 19, length: 25, weight: 1.0 };
+      if (title.includes('3000') || item.yards === 3000) return { height: 12, width: 12, length: 19, weight: 0.7 };
+      if (title.includes('2000') || item.yards === 2000) return { height: 12, width: 12, length: 19, weight: 0.5 };
+      if (title.includes('1000') || item.yards === 1000) return { height: 12, width: 12, length: 19, weight: 0.4 };
+      if (title.includes('500') || item.yards === 500) return { height: 12, width: 12, length: 19, weight: 0.3 };
+      return { height: 12, width: 12, length: 19, weight: 0.3 }; // Default fallback
+    };
+
     try {
       const response = await fetch('https://sandbox.superfrete.com/api/v0/calculator', {
         method: 'POST',
@@ -123,7 +134,7 @@ export const api = {
           'Accept': 'application/json'
         },
         body: JSON.stringify({
-          from: { postal_code: "01153000" }, // CEP de origem fixo
+          from: { postal_code: "74450380" }, // CEP de origem atualizado
           to: { postal_code: cep.replace(/\D/g, '') },
           services: "1,2,17",
           options: {
@@ -132,13 +143,16 @@ export const api = {
             insurance_value: 0,
             use_insurance_value: false
           },
-          products: items.map(item => ({
-            quantity: item.quantity,
-            height: 4,
-            length: 16,
-            width: 11,
-            weight: 0.3
-          }))
+          products: items.map(item => {
+            const dims = getDimensions(item);
+            return {
+              quantity: item.quantity,
+              height: dims.height,
+              length: dims.length,
+              width: dims.width,
+              weight: dims.weight
+            };
+          })
         })
       });
 
@@ -167,12 +181,12 @@ export const api = {
         body: JSON.stringify({
           from: {
             name: "Loja Dente de Tubarao",
-            address: "Rua Ficticia",
-            number: "123",
-            district: "Centro",
-            city: "São Paulo",
-            state_abbr: "SP",
-            postal_code: "01153000",
+            address: "Rua Almeida Lara quadra 64 lt 14",
+            number: "SN",
+            district: "Capuava",
+            city: "Goiania",
+            state_abbr: "GO",
+            postal_code: "74450380",
             document: "00000000000000"
           },
           to: {
@@ -191,9 +205,9 @@ export const api = {
             unitary_value: item.price
           })),
           volumes: order.package_dimensions || {
-            height: 4,
-            width: 11,
-            length: 16,
+            height: 12,
+            width: 12,
+            length: 19,
             weight: 0.3
           },
           options: {
