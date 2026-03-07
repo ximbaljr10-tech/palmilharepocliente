@@ -125,7 +125,7 @@ export const api = {
     };
 
     try {
-      const response = await fetch('https://sandbox.superfrete.com/api/v0/calculator', {
+      const response = await fetch('/api/superfrete/calculator', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
@@ -170,7 +170,7 @@ export const api = {
 
   generateShippingLabel: async (order: any) => {
     try {
-      const response = await fetch('https://sandbox.superfrete.com/api/v0/cart', {
+      const response = await fetch('/api/superfrete/cart', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',

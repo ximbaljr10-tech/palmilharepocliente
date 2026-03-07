@@ -10,6 +10,7 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const { addToCart } = useCart();
+  const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
     fetch('/products.json')
@@ -32,8 +33,6 @@ export default function ProductDetail() {
       </div>
     );
   }
-
-  const [isAdding, setIsAdding] = useState(false);
 
   const handleBuy = () => {
     if (isAdding) return;
