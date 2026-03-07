@@ -15,7 +15,7 @@ export default function Checkout() {
     name: user?.name || '',
     email: user?.email || '',
     password: '',
-    whatsapp: '',
+    whatsapp: user?.whatsapp || '',
     cep: '',
     street: '',
     number: '',
@@ -72,6 +72,22 @@ export default function Checkout() {
     
     let currentUserId = user?.id;
 
+    // Se estiver logado, verifica se mudou os dados e atualiza
+    if (user) {
+      if (formData.name !== user.name || formData.email !== user.email || formData.whatsapp !== user.whatsapp) {
+        try {
+          await api.updateUser(user.id, {
+            name: formData.name,
+            email: formData.email,
+            whatsapp: formData.whatsapp
+          });
+          login({ ...user, name: formData.name, email: formData.email, whatsapp: formData.whatsapp });
+        } catch (err) {
+          console.error('Erro ao atualizar dados do usuário', err);
+        }
+      }
+    }
+
     // Se não estiver logado, cria a conta
     if (!user) {
       try {
@@ -79,6 +95,7 @@ export default function Checkout() {
           name: formData.name,
           email: formData.email,
           password: formData.password,
+          whatsapp: formData.whatsapp,
         });
         
         if (!regData.success && regData.error === 'Email já cadastrado') {
@@ -93,7 +110,7 @@ export default function Checkout() {
           }
         } else if (regData.success) {
           currentUserId = regData.userId;
-          login({ id: regData.userId, name: formData.name, email: formData.email, role: 'customer' });
+          login({ id: regData.userId, name: formData.name, email: formData.email, role: 'customer', whatsapp: formData.whatsapp });
         } else {
           alert(regData.error || 'Erro ao criar conta.');
           return;

@@ -5,6 +5,7 @@ export interface User {
   name: string;
   email: string;
   role: string;
+  whatsapp?: string;
 }
 
 interface UserContextType {

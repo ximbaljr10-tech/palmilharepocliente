@@ -1,17 +1,19 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, Package } from 'lucide-react';
 import { CartProvider, useCart } from './CartContext';
-import { UserProvider } from './UserContext';
+import { UserProvider, useUser } from './UserContext';
 import Home from './pages/Home';
 import ProductDetail from './pages/ProductDetail';
 import Cart from './pages/Cart';
 import Checkout from './pages/Checkout';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import CustomerPanel from './pages/CustomerPanel';
 import AdminPanel from './pages/AdminPanel';
 
 function Header() {
   const { cart } = useCart();
+  const { user } = useUser();
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
@@ -26,6 +28,13 @@ function Header() {
           />
         </Link>
         <div className="flex items-center gap-6">
+          <Link 
+            to={user ? (user.role === 'admin' ? '/admin' : '/customer') : '/login'} 
+            className="text-sm font-medium hover:text-emerald-600 transition-colors flex items-center gap-2"
+          >
+            <Package size={20} />
+            <span className="hidden sm:inline">Acompanhar Pedido</span>
+          </Link>
           <Link to="/cart" className="relative flex items-center gap-2 hover:text-emerald-600 transition-colors">
             <ShoppingCart size={24} />
             {itemCount > 0 && (
@@ -54,6 +63,7 @@ export default function App() {
                 <Route path="/cart" element={<Cart />} />
                 <Route path="/checkout" element={<Checkout />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
                 <Route path="/customer" element={<CustomerPanel />} />
                 <Route path="/admin" element={<AdminPanel />} />
               </Routes>

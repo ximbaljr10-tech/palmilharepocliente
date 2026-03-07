@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useUser } from '../UserContext';
 import { api } from '../api';
 
@@ -71,6 +71,22 @@ export default function Login() {
         >
           Entrar
         </button>
+        
+        <div className="flex flex-col sm:flex-row justify-between items-center mt-6 pt-6 border-t border-zinc-100 gap-4 text-sm">
+          <button 
+            type="button"
+            onClick={() => alert('Em breve: Envio de código de verificação para o e-mail.')}
+            className="text-zinc-500 hover:text-emerald-600 transition-colors"
+          >
+            Esqueci minha senha
+          </button>
+          <Link 
+            to="/register" 
+            className="font-bold text-emerald-600 hover:text-emerald-700 transition-colors"
+          >
+            Criar uma conta
+          </Link>
+        </div>
       </form>
     </div>
   );

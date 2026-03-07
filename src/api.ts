@@ -40,7 +40,7 @@ export const api = {
     const data = getData();
     const user = data.users.find((u: any) => u.email === credentials.email && u.password === credentials.password);
     if (user) {
-      return { success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } };
+      return { success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, whatsapp: user.whatsapp } };
     }
     return { success: false, error: 'Credenciais inválidas' };
   },
@@ -95,5 +95,17 @@ export const api = {
     await delay(300);
     const data = getData();
     return data.users.map((u:any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, created_at: u.created_at })).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  },
+  
+  updateUser: async (id: number, updateData: any) => {
+    await delay(300);
+    const data = getData();
+    const userIndex = data.users.findIndex((u: any) => u.id === id);
+    if (userIndex !== -1) {
+      data.users[userIndex] = { ...data.users[userIndex], ...updateData };
+      saveData(data);
+      return { success: true, user: data.users[userIndex] };
+    }
+    return { success: false, error: 'Usuário não encontrado' };
   }
 };
