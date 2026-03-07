@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../CartContext';
+import { useUser } from '../UserContext';
 import { CheckCircle2, Copy, MapPin, Truck } from 'lucide-react';
 
 export default function Checkout() {
   const { cart, total, clearCart } = useCart();
+  const { user, login } = useUser();
   const navigate = useNavigate();
   const [step, setStep] = useState<'form' | 'pix'>('form');
   const [loadingCep, setLoadingCep] = useState(false);
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
+    name: user?.name || '',
+    email: user?.email || '',
+    password: '',
     whatsapp: '',
     cep: '',
     street: '',
@@ -21,6 +24,7 @@ export default function Checkout() {
     state: '',
   });
   const [orderId, setOrderId] = useState<number | null>(null);
+  const [finalTotal, setFinalTotal] = useState<number>(0);
   const [copied, setCopied] = useState(false);
 
   const pixKey = '12.345.678/0001-90'; // Exemplo de chave PIX
@@ -35,9 +39,7 @@ export default function Checkout() {
     let cep = e.target.value.replace(/\D/g, '');
     if (cep.length > 8) cep = cep.slice(0, 8);
     
-    // Formata o CEP (XXXXX-XXX)
     const formattedCep = cep.replace(/^(\d{5})(\d)/, '$1-$2');
-    
     setFormData(prev => ({ ...prev, cep: formattedCep }));
 
     if (cep.length === 8) {
@@ -54,7 +56,6 @@ export default function Checkout() {
             city: data.localidade,
             state: data.uf,
           }));
-          // Foca no campo de número após preencher o endereço
           document.getElementById('number')?.focus();
         }
       } catch (error) {
@@ -68,11 +69,78 @@ export default function Checkout() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Generate a random order ID since we don't have a backend
-    const newOrderId = Math.floor(Math.random() * 100000) + 1000;
-    setOrderId(newOrderId);
-    setStep('pix');
-    clearCart();
+    let currentUserId = user?.id;
+
+    // Se não estiver logado, cria a conta
+    if (!user) {
+      try {
+        const regRes = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formData.name,
+            email: formData.email,
+            password: formData.password,
+          }),
+        });
+        const regData = await regRes.json();
+        
+        if (!regData.success && regData.error === 'Email já cadastrado') {
+          // Tenta fazer login com a senha fornecida
+          const loginRes = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: formData.email, password: formData.password }),
+          });
+          const loginData = await loginRes.json();
+          if (loginData.success) {
+            currentUserId = loginData.user.id;
+            login(loginData.user);
+          } else {
+            alert('Este email já está cadastrado. A senha informada está incorreta.');
+            return;
+          }
+        } else if (regData.success) {
+          currentUserId = regData.userId;
+          login({ id: regData.userId, name: formData.name, email: formData.email, role: 'customer' });
+        } else {
+          alert(regData.error || 'Erro ao criar conta.');
+          return;
+        }
+      } catch (err) {
+        alert('Erro de conexão ao criar conta.');
+        return;
+      }
+    }
+
+    const fullAddress = `${formData.street}, ${formData.number}${formData.complement ? ` - ${formData.complement}` : ''}, ${formData.neighborhood}, ${formData.city} - ${formData.state}, CEP: ${formData.cep}`;
+    
+    try {
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUserId,
+          name: formData.name,
+          email: formData.email,
+          whatsapp: formData.whatsapp,
+          address: fullAddress,
+          items: cart,
+          totalAmount: total,
+        }),
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        setOrderId(data.orderId);
+        setFinalTotal(total); // Salva o total antes de limpar o carrinho
+        setStep('pix');
+        clearCart();
+      }
+    } catch (error) {
+      console.error('Erro ao finalizar pedido:', error);
+      alert('Ocorreu um erro ao processar seu pedido. Tente novamente.');
+    }
   };
 
   const handleCopyPix = () => {
@@ -83,7 +151,7 @@ export default function Checkout() {
 
   if (step === 'pix') {
     const whatsappMessage = encodeURIComponent(
-      `Olá! Fiz o pedido #${orderId} no valor de R$ ${total.toFixed(2).replace('.', ',')}. Segue o comprovante do PIX:`
+      `Olá! Fiz o pedido #${orderId} no valor de R$ ${finalTotal.toFixed(2).replace('.', ',')}. Segue o comprovante do PIX:`
     );
     const whatsappLink = `https://wa.me/${whatsappNumber}?text=${whatsappMessage}`;
 
@@ -96,7 +164,7 @@ export default function Checkout() {
         <p className="text-zinc-500">Seu pedido #{orderId} foi registrado com sucesso.</p>
         
         <div className="bg-zinc-50 p-6 rounded-2xl space-y-4">
-          <p className="font-medium text-zinc-900">Valor a pagar: R$ {total.toFixed(2).replace('.', ',')}</p>
+          <p className="font-medium text-zinc-900">Valor a pagar: R$ {finalTotal.toFixed(2).replace('.', ',')}</p>
           
           <div className="space-y-2">
             <p className="text-sm text-zinc-500">Chave PIX (CNPJ):</p>
@@ -127,10 +195,10 @@ export default function Checkout() {
             Enviar Comprovante
           </a>
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/customer')}
             className="block w-full text-zinc-500 font-medium hover:text-zinc-900 transition-colors py-2"
           >
-            Voltar para a loja
+            Acompanhar meu pedido
           </button>
         </div>
       </div>
@@ -151,17 +219,33 @@ export default function Checkout() {
             </h2>
             
             <div className="space-y-4">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-1">E-mail</label>
-                <input
-                  type="email"
-                  id="email"
-                  required
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                  placeholder="seu@email.com"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-1">E-mail</label>
+                  <input
+                    type="email"
+                    id="email"
+                    required
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    placeholder="seu@email.com"
+                  />
+                </div>
+                {!user && (
+                  <div>
+                    <label htmlFor="password" className="block text-sm font-medium text-zinc-700 mb-1">Crie uma senha</label>
+                    <input
+                      type="password"
+                      id="password"
+                      required
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      placeholder="Para acompanhar o pedido"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

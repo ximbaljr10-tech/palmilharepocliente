@@ -1,10 +1,14 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { ShoppingCart } from 'lucide-react';
 import { CartProvider, useCart } from './CartContext';
+import { UserProvider } from './UserContext';
 import Home from './pages/Home';
 import ProductDetail from './pages/ProductDetail';
 import Cart from './pages/Cart';
 import Checkout from './pages/Checkout';
+import Login from './pages/Login';
+import CustomerPanel from './pages/CustomerPanel';
+import AdminPanel from './pages/AdminPanel';
 
 function Header() {
   const { cart } = useCart();
@@ -21,14 +25,16 @@ function Header() {
             referrerPolicy="no-referrer"
           />
         </Link>
-        <Link to="/cart" className="relative flex items-center gap-2 hover:text-emerald-600 transition-colors">
-          <ShoppingCart size={24} />
-          {itemCount > 0 && (
-            <span className="absolute -top-2 -right-2 bg-emerald-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-              {itemCount}
-            </span>
-          )}
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link to="/cart" className="relative flex items-center gap-2 hover:text-emerald-600 transition-colors">
+            <ShoppingCart size={24} />
+            {itemCount > 0 && (
+              <span className="absolute -top-2 -right-2 bg-emerald-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                {itemCount}
+              </span>
+            )}
+          </Link>
+        </div>
       </div>
     </header>
   );
@@ -36,20 +42,25 @@ function Header() {
 
 export default function App() {
   return (
-    <CartProvider>
-      <Router>
-        <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900">
-          <Header />
-          <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/product/:id" element={<ProductDetail />} />
-              <Route path="/cart" element={<Cart />} />
-              <Route path="/checkout" element={<Checkout />} />
-            </Routes>
-          </main>
-        </div>
-      </Router>
-    </CartProvider>
+    <UserProvider>
+      <CartProvider>
+        <Router>
+          <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900">
+            <Header />
+            <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/product/:id" element={<ProductDetail />} />
+                <Route path="/cart" element={<Cart />} />
+                <Route path="/checkout" element={<Checkout />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/customer" element={<CustomerPanel />} />
+                <Route path="/admin" element={<AdminPanel />} />
+              </Routes>
+            </main>
+          </div>
+        </Router>
+      </CartProvider>
+    </UserProvider>
   );
 }
