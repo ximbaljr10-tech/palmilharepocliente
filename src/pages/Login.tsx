@@ -42,16 +42,20 @@ export default function Login() {
         </div>
       )}
 
+      <div className="bg-blue-50 text-blue-600 p-3 rounded-xl mb-6 text-xs text-center">
+        Para acessar o painel admin, faça login com o e-mail <strong>admin</strong> e senha <strong>admin123</strong>.
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-zinc-700 mb-1">E-mail</label>
           <input
-            type="email"
+            type="text"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 outline-none"
-            placeholder="seu@email.com"
+            placeholder="seu@email.com ou admin"
           />
         </div>
         <div>

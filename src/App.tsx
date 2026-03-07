@@ -80,7 +80,7 @@ function Header() {
             className="text-sm font-medium hover:text-emerald-600 transition-colors flex items-center gap-2"
           >
             <Package size={20} />
-            <span className="hidden sm:inline">Acompanhar Pedido</span>
+            <span>Acompanhar Pedido</span>
           </Link>
           <Link to="/cart" className="relative flex items-center gap-2 hover:text-emerald-600 transition-colors">
             <ShoppingCart size={24} />

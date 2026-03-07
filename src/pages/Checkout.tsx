@@ -31,8 +31,13 @@ export default function Checkout() {
   const pixKey = '12.345.678/0001-90'; // Exemplo de chave PIX
   const whatsappNumber = '5511999999999'; // Exemplo de número de WhatsApp
 
+  React.useEffect(() => {
+    if ((cart.length === 0 || !selectedShipping) && step === 'form') {
+      navigate('/cart');
+    }
+  }, [cart.length, selectedShipping, step, navigate]);
+
   if ((cart.length === 0 || !selectedShipping) && step === 'form') {
-    navigate('/cart');
     return null;
   }
 

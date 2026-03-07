@@ -62,7 +62,7 @@ export default function ProductDetail() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white p-6 sm:p-10 rounded-3xl shadow-sm border border-zinc-100">
         {/* Imagem do Produto */}
-        <div className="aspect-square bg-zinc-50 rounded-2xl overflow-hidden border border-zinc-100 sticky top-24">
+        <div className="aspect-square bg-zinc-50 rounded-2xl overflow-hidden border border-zinc-100">
           {product.image_url ? (
             <img
               src={product.image_url}

@@ -125,8 +125,12 @@ export const api = {
     };
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch('/api/superfrete/calculator', {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
           'User-Agent': 'LojaOnline (kaykep7@gmail.com)',
@@ -156,6 +160,8 @@ export const api = {
         })
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
         throw new Error('Erro ao calcular frete');
       }
@@ -170,8 +176,12 @@ export const api = {
 
   generateShippingLabel: async (order: any) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch('/api/superfrete/cart', {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
           'User-Agent': 'LojaOnline (kaykep7@gmail.com)',
@@ -215,6 +225,8 @@ export const api = {
           }
         })
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error('Erro ao gerar etiqueta');
