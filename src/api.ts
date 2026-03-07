@@ -56,6 +56,9 @@ export const api = {
       customer_whatsapp: orderData.whatsapp,
       customer_address: orderData.address,
       total_amount: orderData.totalAmount,
+      shipping_service: orderData.shipping_service,
+      shipping_fee: orderData.shipping_fee,
+      package_dimensions: orderData.package_dimensions,
       status: 'pending',
       tracking_code: null,
       created_at: new Date().toISOString(),
@@ -107,5 +110,107 @@ export const api = {
       return { success: true, user: data.users[userIndex] };
     }
     return { success: false, error: 'Usuário não encontrado' };
+  },
+
+  calculateShipping: async (cep: string, items: any[]) => {
+    try {
+      const response = await fetch('https://sandbox.superfrete.com/api/v0/calculator', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
+          'User-Agent': 'LojaOnline (kaykep7@gmail.com)',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          from: { postal_code: "01153000" }, // CEP de origem fixo
+          to: { postal_code: cep.replace(/\D/g, '') },
+          services: "1,2,17",
+          options: {
+            own_hand: false,
+            receipt: false,
+            insurance_value: 0,
+            use_insurance_value: false
+          },
+          products: items.map(item => ({
+            quantity: item.quantity,
+            height: 4,
+            length: 16,
+            width: 11,
+            weight: 0.3
+          }))
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao calcular frete');
+      }
+
+      const data = await response.json();
+      return { success: true, options: data };
+    } catch (error) {
+      console.error('Erro no cálculo de frete:', error);
+      return { success: false, error: 'Não foi possível calcular o frete. Tente novamente.' };
+    }
+  },
+
+  generateShippingLabel: async (order: any) => {
+    try {
+      const response = await fetch('https://sandbox.superfrete.com/api/v0/cart', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
+          'User-Agent': 'LojaOnline (kaykep7@gmail.com)',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          from: {
+            name: "Loja Dente de Tubarao",
+            address: "Rua Ficticia",
+            number: "123",
+            district: "Centro",
+            city: "São Paulo",
+            state_abbr: "SP",
+            postal_code: "01153000",
+            document: "00000000000000"
+          },
+          to: {
+            name: order.customer_name,
+            address: order.customer_address.split(',')[0],
+            number: order.customer_address.split(',')[1]?.split('-')[0]?.trim() || "SN",
+            district: order.customer_address.split(',')[2]?.trim() || "Bairro",
+            city: order.customer_address.split(',')[3]?.split('-')[0]?.trim() || "Cidade",
+            state_abbr: order.customer_address.split('-')[1]?.split(',')[0]?.trim() || "SP",
+            postal_code: order.customer_address.match(/\d{5}-\d{3}/)?.[0]?.replace('-', '') || "00000000"
+          },
+          service: order.shipping_service || 1,
+          products: order.items.map((item: any) => ({
+            name: item.title,
+            quantity: item.quantity,
+            unitary_value: item.price
+          })),
+          volumes: order.package_dimensions || {
+            height: 4,
+            width: 11,
+            length: 16,
+            weight: 0.3
+          },
+          options: {
+            non_commercial: true
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao gerar etiqueta');
+      }
+
+      const data = await response.json();
+      return { success: true, label: data };
+    } catch (error) {
+      console.error('Erro na geração de etiqueta:', error);
+      return { success: false, error: 'Não foi possível gerar a etiqueta.' };
+    }
   }
 };

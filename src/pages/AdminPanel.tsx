@@ -23,6 +23,19 @@ export default function AdminPanel() {
 
   const updateOrderStatus = async (id: number, status: string, tracking_code: string) => {
     try {
+      const order = orders.find(o => o.id === id);
+      
+      // Se o status mudou para 'paid' e ainda não tem código de rastreio, envia para SuperFrete
+      if (status === 'paid' && order && order.status !== 'paid' && !tracking_code) {
+        const res = await api.generateShippingLabel(order);
+        if (res.success) {
+          alert('Pedido enviado para a SuperFrete com sucesso! A etiqueta está aguardando pagamento no painel da SuperFrete.');
+          // O código de rastreio será gerado após o pagamento da etiqueta na SuperFrete
+        } else {
+          alert('Erro ao enviar pedido para a SuperFrete. Verifique os dados do pedido.');
+        }
+      }
+
       await api.updateOrder(id, { status, tracking_code });
       setOrders(orders.map(o => o.id === id ? { ...o, status, tracking_code } : o));
     } catch (err) {

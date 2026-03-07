@@ -12,3 +12,11 @@ export interface Product {
 export interface CartItem extends Product {
   quantity: number;
 }
+
+export interface ShippingOption {
+  id: number;
+  name: string;
+  price: number;
+  delivery_time: number;
+  package: any;
+}

@@ -6,7 +6,7 @@ import { api } from '../api';
 import { CheckCircle2, Copy, MapPin, Truck } from 'lucide-react';
 
 export default function Checkout() {
-  const { cart, total, clearCart } = useCart();
+  const { cart, total, clearCart, selectedShipping } = useCart();
   const { user, login } = useUser();
   const navigate = useNavigate();
   const [step, setStep] = useState<'form' | 'pix'>('form');
@@ -31,7 +31,7 @@ export default function Checkout() {
   const pixKey = '12.345.678/0001-90'; // Exemplo de chave PIX
   const whatsappNumber = '5511999999999'; // Exemplo de número de WhatsApp
 
-  if (cart.length === 0 && step === 'form') {
+  if ((cart.length === 0 || !selectedShipping) && step === 'form') {
     navigate('/cart');
     return null;
   }
@@ -132,6 +132,9 @@ export default function Checkout() {
         address: fullAddress,
         items: cart,
         totalAmount: total,
+        shipping_service: selectedShipping?.id,
+        shipping_fee: selectedShipping?.price,
+        package_dimensions: selectedShipping?.package
       });
       
       if (data.success) {
@@ -415,11 +418,11 @@ export default function Checkout() {
           <div className="border-t border-zinc-200 pt-4 space-y-3 mb-6">
             <div className="flex justify-between text-sm text-zinc-600">
               <span>Subtotal</span>
-              <span>R$ {total.toFixed(2).replace('.', ',')}</span>
+              <span>R$ {(total - (selectedShipping?.price || 0)).toFixed(2).replace('.', ',')}</span>
             </div>
             <div className="flex justify-between text-sm text-zinc-600">
-              <span>Frete</span>
-              <span className="text-emerald-600 font-medium">Grátis</span>
+              <span>Frete ({selectedShipping?.name})</span>
+              <span className="text-zinc-900 font-medium">R$ {selectedShipping?.price.toFixed(2).replace('.', ',')}</span>
             </div>
             <div className="flex justify-between text-lg font-bold text-zinc-900 pt-3 border-t border-zinc-200">
               <span>Total</span>
