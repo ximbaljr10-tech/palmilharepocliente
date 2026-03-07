@@ -5,6 +5,7 @@ import { useCart } from '../CartContext';
 import { Search, Filter } from 'lucide-react';
 
 export default function Home() {
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [yardsOptions, setYardsOptions] = useState<number[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -12,20 +13,36 @@ export default function Home() {
   const { addToCart } = useCart();
 
   useEffect(() => {
-    fetch('/api/yards')
+    fetch('/products.json')
       .then((res) => res.json())
-      .then((data) => setYardsOptions(data));
+      .then((data: Product[]) => {
+        setAllProducts(data);
+        setProducts(data);
+        
+        // Extract unique yards
+        const uniqueYards = Array.from(new Set(data.map(p => p.yards).filter((y): y is number => y !== null)));
+        setYardsOptions(uniqueYards.sort((a, b) => a - b));
+      })
+      .catch(err => console.error("Error loading products:", err));
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (searchQuery) params.append('q', searchQuery);
-    if (selectedYards) params.append('yards', selectedYards);
+    let filtered = allProducts;
 
-    fetch(`/api/products?${params.toString()}`)
-      .then((res) => res.json())
-      .then((data) => setProducts(data));
-  }, [searchQuery, selectedYards]);
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(p => 
+        p.title.toLowerCase().includes(q) || 
+        (p.description && p.description.toLowerCase().includes(q))
+      );
+    }
+
+    if (selectedYards) {
+      filtered = filtered.filter(p => p.yards === parseInt(selectedYards, 10));
+    }
+
+    setProducts(filtered);
+  }, [searchQuery, selectedYards, allProducts]);
 
   return (
     <div className="space-y-8">

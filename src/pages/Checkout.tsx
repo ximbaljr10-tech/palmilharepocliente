@@ -68,32 +68,11 @@ export default function Checkout() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const fullAddress = `${formData.street}, ${formData.number}${formData.complement ? ` - ${formData.complement}` : ''}, ${formData.neighborhood}, ${formData.city} - ${formData.state}, CEP: ${formData.cep}`;
-    
-    try {
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formData.name,
-          email: formData.email,
-          whatsapp: formData.whatsapp,
-          address: fullAddress,
-          items: cart,
-          totalAmount: total,
-        }),
-      });
-      
-      const data = await response.json();
-      if (data.success) {
-        setOrderId(data.orderId);
-        setStep('pix');
-        clearCart();
-      }
-    } catch (error) {
-      console.error('Erro ao finalizar pedido:', error);
-      alert('Ocorreu um erro ao processar seu pedido. Tente novamente.');
-    }
+    // Generate a random order ID since we don't have a backend
+    const newOrderId = Math.floor(Math.random() * 100000) + 1000;
+    setOrderId(newOrderId);
+    setStep('pix');
+    clearCart();
   };
 
   const handleCopyPix = () => {

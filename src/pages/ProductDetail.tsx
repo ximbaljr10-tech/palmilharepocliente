@@ -12,12 +12,16 @@ export default function ProductDetail() {
   const { addToCart } = useCart();
 
   useEffect(() => {
-    fetch(`/api/products/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Product not found');
-        return res.json();
+    fetch('/products.json')
+      .then((res) => res.json())
+      .then((data: Product[]) => {
+        const found = data.find(p => p.id === parseInt(id || '0', 10));
+        if (found) {
+          setProduct(found);
+        } else {
+          throw new Error('Product not found');
+        }
       })
-      .then((data) => setProduct(data))
       .catch(() => navigate('/'));
   }, [id, navigate]);
 
