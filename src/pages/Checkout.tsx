@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import { useUser } from '../UserContext';
+import { api } from '../api';
 import { CheckCircle2, Copy, MapPin, Truck } from 'lucide-react';
 
 export default function Checkout() {
@@ -74,25 +75,15 @@ export default function Checkout() {
     // Se não estiver logado, cria a conta
     if (!user) {
       try {
-        const regRes = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: formData.name,
-            email: formData.email,
-            password: formData.password,
-          }),
+        const regData = await api.register({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
         });
-        const regData = await regRes.json();
         
         if (!regData.success && regData.error === 'Email já cadastrado') {
           // Tenta fazer login com a senha fornecida
-          const loginRes = await fetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: formData.email, password: formData.password }),
-          });
-          const loginData = await loginRes.json();
+          const loginData = await api.login({ email: formData.email, password: formData.password });
           if (loginData.success) {
             currentUserId = loginData.user.id;
             login(loginData.user);
@@ -116,21 +107,16 @@ export default function Checkout() {
     const fullAddress = `${formData.street}, ${formData.number}${formData.complement ? ` - ${formData.complement}` : ''}, ${formData.neighborhood}, ${formData.city} - ${formData.state}, CEP: ${formData.cep}`;
     
     try {
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUserId,
-          name: formData.name,
-          email: formData.email,
-          whatsapp: formData.whatsapp,
-          address: fullAddress,
-          items: cart,
-          totalAmount: total,
-        }),
+      const data = await api.createOrder({
+        userId: currentUserId,
+        name: formData.name,
+        email: formData.email,
+        whatsapp: formData.whatsapp,
+        address: fullAddress,
+        items: cart,
+        totalAmount: total,
       });
       
-      const data = await response.json();
       if (data.success) {
         setOrderId(data.orderId);
         setFinalTotal(total); // Salva o total antes de limpar o carrinho

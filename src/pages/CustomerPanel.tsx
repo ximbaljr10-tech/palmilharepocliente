@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../UserContext';
+import { api } from '../api';
 import { Package, Truck, CheckCircle2 } from 'lucide-react';
 
 export default function CustomerPanel() {
@@ -14,8 +15,7 @@ export default function CustomerPanel() {
       return;
     }
 
-    fetch(`/api/orders/user/${user.id}`)
-      .then(res => res.json())
+    api.getUserOrders(user.id)
       .then(data => setOrders(data))
       .catch(err => console.error(err));
   }, [user, navigate]);

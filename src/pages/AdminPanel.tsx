@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../UserContext';
+import { api } from '../api';
 import { Users, ShoppingBag, Truck, Edit3 } from 'lucide-react';
 
 export default function AdminPanel() {
@@ -16,22 +17,13 @@ export default function AdminPanel() {
       return;
     }
 
-    fetch('/api/admin/orders')
-      .then(res => res.json())
-      .then(data => setOrders(data));
-
-    fetch('/api/admin/users')
-      .then(res => res.json())
-      .then(data => setUsers(data));
+    api.getAdminOrders().then(data => setOrders(data));
+    api.getAdminUsers().then(data => setUsers(data));
   }, [user, navigate]);
 
   const updateOrderStatus = async (id: number, status: string, tracking_code: string) => {
     try {
-      await fetch(`/api/admin/orders/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, tracking_code }),
-      });
+      await api.updateOrder(id, { status, tracking_code });
       setOrders(orders.map(o => o.id === id ? { ...o, status, tracking_code } : o));
     } catch (err) {
       console.error(err);
