@@ -1,242 +1,376 @@
-// Simulated backend using localStorage for Vercel static deployment
+// Medusa Backend API - Production Ready
+// All API calls go through Nginx reverse proxy (same origin)
+// Nginx proxies /store/, /admin/, /auth/, /health to Medusa on port 9000
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Auto-detect Medusa URL based on current host
+// In production: frontend and API are on the same host via Nginx (port 80)
+// In development: API is on localhost:9000
+const MEDUSA_URL = (() => {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const port = window.location.port;
+    // If served from port 80 (or no port = default), use same origin (Nginx proxy)
+    if (port === '' || port === '80' || port === '443') {
+      return `${window.location.protocol}//${host}`;
+    }
+    // Development: Vite dev server on 3000/5173/etc -> Medusa on 9000
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return "http://localhost:9000";
+    }
+    // Other: direct to Medusa
+    return `http://${host}:9000`;
+  }
+  return "http://localhost:9000";
+})();
 
-const getData = () => {
-  const data = localStorage.getItem('app_data');
-  if (data) return JSON.parse(data);
-  const initialData = {
-    users: [{ id: 1, name: 'Admin', email: 'admin', password: 'admin123', role: 'admin', created_at: new Date().toISOString() }],
-    orders: []
+const PUBLISHABLE_KEY = "pk_b54130691636a84f3172ebbc1d0ac4d9b14bc2430db612d289a055e341b7b706";
+const REGION_ID = "reg_01KK3F27J2GGKVBAPK30N9VBBH";
+
+// Helper for Medusa Store API calls (with publishable key)
+async function medusaStore(path: string, options: RequestInit = {}) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "x-publishable-api-key": PUBLISHABLE_KEY,
+    ...(options.headers as Record<string, string> || {}),
   };
-  localStorage.setItem('app_data', JSON.stringify(initialData));
-  return initialData;
-};
 
-const saveData = (data: any) => {
-  localStorage.setItem('app_data', JSON.stringify(data));
-};
+  const token = localStorage.getItem("medusa_token");
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${MEDUSA_URL}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Erro de conexão" }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// Helper for Medusa Auth calls (no publishable key needed)
+async function medusaAuth(path: string, options: RequestInit = {}) {
+  const res = await fetch(`${MEDUSA_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string> || {}),
+    },
+  });
+  return res.json();
+}
+
+// Shipping dimensions by yards - accurate SuperFrete measurements
+function getShippingByYards(yards: number | null, title: string): { height: number; width: number; length: number; weight: number } {
+  // Check for carretilha (reel) in title
+  if (title && /carretilha/i.test(title)) {
+    return { height: 25, width: 33, length: 31, weight: 1.0 };
+  }
+  switch (yards) {
+    case 50:   return { height: 12, width: 12, length: 12, weight: 0.2 };
+    case 100:  return { height: 12, width: 12, length: 12, weight: 0.2 };
+    case 200:  return { height: 12, width: 12, length: 12, weight: 0.2 };
+    case 500:  return { height: 12, width: 12, length: 19, weight: 0.4 };
+    case 600:  return { height: 12, width: 18, length: 18, weight: 0.3 };
+    case 1000: return { height: 15, width: 15, length: 18, weight: 0.5 };
+    case 2000: return { height: 18, width: 18, length: 19, weight: 1.0 };
+    case 3000: return { height: 18, width: 18, length: 27, weight: 1.0 };
+    case 6000: return { height: 19, width: 19, length: 25, weight: 2.0 };
+    case 12000: return { height: 21, width: 21, length: 30, weight: 3.0 };
+    default:   return { height: 12, width: 12, length: 12, weight: 0.2 };
+  }
+}
+
+// Map Medusa product to our frontend format
+function mapMedusaProduct(p: any) {
+  const variant = p.variants?.[0];
+  const price = variant?.calculated_price?.calculated_amount || 0;
+  const metadata = p.metadata || {};
+  const image = p.images?.[0]?.url || p.thumbnail || "";
+
+  // Extract yards from title
+  const yardsMatch = p.title?.match(/(\d+)\s*(j|jds|jardas)\b/i);
+  const yards = yardsMatch ? parseInt(yardsMatch[1], 10) : (metadata.yards || null);
+
+  const shipping = getShippingByYards(yards, p.title || '');
+
+  return {
+    id: p.id,
+    medusa_id: p.id,
+    title: p.title,
+    handle: p.handle,
+    description: p.description || "",
+    vendor: p.subtitle || metadata.vendor || "Dente de Tubarão",
+    price: price,
+    image_url: image,
+    yards: yards,
+    variant_id: variant?.id,
+    metadata: metadata,
+    shipping: {
+      height: metadata.shipping_height || shipping.height,
+      width: metadata.shipping_width || shipping.width,
+      length: metadata.shipping_length || shipping.length,
+      weight: metadata.shipping_weight || shipping.weight,
+    },
+  };
+}
 
 export const api = {
+  // ============ PRODUCTS ============
+  getProducts: async (limit = 100, offset = 0) => {
+    try {
+      const data = await medusaStore(
+        `/store/products?limit=${limit}&offset=${offset}&region_id=${REGION_ID}&fields=*variants.calculated_price`
+      );
+      return {
+        products: (data.products || []).map(mapMedusaProduct),
+        count: data.count || 0,
+      };
+    } catch (err) {
+      console.error("Erro ao buscar produtos:", err);
+      return { products: [], count: 0 };
+    }
+  },
+
+  getProduct: async (id: string) => {
+    try {
+      const data = await medusaStore(
+        `/store/products/${id}?region_id=${REGION_ID}&fields=*variants.calculated_price`
+      );
+      return mapMedusaProduct(data.product);
+    } catch (err) {
+      console.error("Erro ao buscar produto:", err);
+      return null;
+    }
+  },
+
+  // ============ AUTH ============
   register: async (userData: any) => {
-    await delay(300);
-    const data = getData();
-    if (data.users.find((u: any) => u.email === userData.email)) {
-      return { success: false, error: 'Email já cadastrado' };
+    try {
+      // 1. Create auth identity in Medusa
+      const authRes = await medusaAuth("/auth/customer/emailpass/register", {
+        method: "POST",
+        body: JSON.stringify({
+          email: userData.email,
+          password: userData.password,
+        }),
+      });
+
+      if (authRes.type === "invalid_data" || authRes.type === "duplicate_error") {
+        return { success: false, error: "Email já cadastrado" };
+      }
+
+      const token = authRes.token;
+      if (!token) {
+        return { success: false, error: "Erro ao criar conta" };
+      }
+
+      // 2. Create customer profile
+      const customerRes = await fetch(`${MEDUSA_URL}/store/customers`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-publishable-api-key": PUBLISHABLE_KEY,
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          first_name: userData.name?.split(" ")[0] || userData.firstName || "",
+          last_name: userData.name?.split(" ").slice(1).join(" ") || userData.lastName || " ",
+          email: userData.email,
+          phone: userData.whatsapp || "",
+          metadata: { whatsapp: userData.whatsapp || "" },
+        }),
+      });
+
+      const customerData = await customerRes.json();
+
+      if (customerData.customer) {
+        localStorage.setItem("medusa_token", token);
+        return {
+          success: true,
+          userId: customerData.customer.id,
+          user: {
+            id: customerData.customer.id,
+            name: `${customerData.customer.first_name} ${customerData.customer.last_name}`.trim(),
+            email: customerData.customer.email,
+            role: "customer",
+            whatsapp: userData.whatsapp || "",
+          },
+        };
+      }
+
+      // If customer creation failed but auth was created, still return token
+      localStorage.setItem("medusa_token", token);
+      return {
+        success: true,
+        userId: "unknown",
+        user: {
+          id: "unknown",
+          name: userData.name || `${userData.firstName || ""} ${userData.lastName || ""}`.trim(),
+          email: userData.email,
+          role: "customer",
+          whatsapp: userData.whatsapp || "",
+        },
+      };
+    } catch (err: any) {
+      console.error("Register error:", err);
+      return { success: false, error: err.message || "Erro ao criar conta" };
     }
-    const newUser = {
-      id: data.users.length > 0 ? Math.max(...data.users.map((u:any)=>u.id)) + 1 : 1,
-      ...userData,
-      role: 'customer',
-      created_at: new Date().toISOString()
-    };
-    data.users.push(newUser);
-    saveData(data);
-    return { success: true, userId: newUser.id };
   },
-  
+
   login: async (credentials: any) => {
-    await delay(300);
-    const data = getData();
-    const user = data.users.find((u: any) => u.email === credentials.email && u.password === credentials.password);
-    if (user) {
-      return { success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, whatsapp: user.whatsapp } };
+    try {
+      const authRes = await medusaAuth("/auth/customer/emailpass", {
+        method: "POST",
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password,
+        }),
+      });
+
+      if (!authRes.token) {
+        return { success: false, error: "Credenciais inválidas" };
+      }
+
+      localStorage.setItem("medusa_token", authRes.token);
+
+      // Get customer profile
+      const customerRes = await fetch(`${MEDUSA_URL}/store/customers/me`, {
+        headers: {
+          "x-publishable-api-key": PUBLISHABLE_KEY,
+          "Authorization": `Bearer ${authRes.token}`,
+        },
+      });
+
+      const customerData = await customerRes.json();
+      const c = customerData.customer;
+
+      if (c) {
+        return {
+          success: true,
+          user: {
+            id: c.id,
+            name: `${c.first_name || ""} ${c.last_name || ""}`.trim(),
+            email: c.email,
+            role: "customer",
+            whatsapp: c.metadata?.whatsapp || c.phone || "",
+          },
+        };
+      }
+
+      return { success: false, error: "Perfil não encontrado" };
+    } catch (err: any) {
+      console.error("Login error:", err);
+      return { success: false, error: "Credenciais inválidas" };
     }
-    return { success: false, error: 'Credenciais inválidas' };
   },
-  
+
+  logout: async () => {
+    localStorage.removeItem("medusa_token");
+  },
+
+  // ============ CUSTOMER ============
+  updateUser: async (_id: string, updateData: any) => {
+    try {
+      const res = await medusaStore("/store/customers/me", {
+        method: "POST",
+        body: JSON.stringify({
+          first_name: updateData.name?.split(" ")[0],
+          last_name: updateData.name?.split(" ").slice(1).join(" "),
+          phone: updateData.whatsapp,
+          metadata: { whatsapp: updateData.whatsapp },
+        }),
+      });
+      return { success: true, user: res.customer };
+    } catch (err) {
+      return { success: false, error: "Erro ao atualizar" };
+    }
+  },
+
+  // ============ ORDERS (via Medusa custom endpoint) ============
   createOrder: async (orderData: any) => {
-    await delay(300);
-    const data = getData();
-    const newOrder = {
-      id: data.orders.length > 0 ? Math.max(...data.orders.map((o:any)=>o.id)) + 1 : 1,
-      user_id: orderData.userId || null,
-      customer_name: orderData.name,
-      customer_email: orderData.email,
-      customer_whatsapp: orderData.whatsapp,
-      customer_address: orderData.address,
-      total_amount: orderData.totalAmount,
-      shipping_service: orderData.shipping_service,
-      shipping_fee: orderData.shipping_fee,
-      package_dimensions: orderData.package_dimensions,
-      status: 'pending',
-      tracking_code: null,
-      created_at: new Date().toISOString(),
-      items: orderData.items
-    };
-    data.orders.push(newOrder);
-    saveData(data);
-    return { success: true, orderId: newOrder.id };
-  },
-  
-  getUserOrders: async (userId: number) => {
-    await delay(300);
-    const data = getData();
-    return data.orders.filter((o: any) => o.user_id === userId).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  },
-  
-  getAdminOrders: async () => {
-    await delay(300);
-    const data = getData();
-    return data.orders.sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  },
-  
-  updateOrder: async (id: number, updateData: any) => {
-    await delay(300);
-    const data = getData();
-    const order = data.orders.find((o: any) => o.id === id);
-    if (order) {
-      order.status = updateData.status;
-      order.tracking_code = updateData.tracking_code || null;
-      saveData(data);
-      return { success: true };
+    try {
+      const res = await fetch(`${MEDUSA_URL}/store/orders-custom`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-publishable-api-key": PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({
+          customerId: orderData.userId,
+          customerName: orderData.name,
+          customerEmail: orderData.email,
+          customerWhatsapp: orderData.whatsapp,
+          customerAddress: orderData.address,
+          addressComponents: orderData.address_components,
+          items: orderData.items,
+          totalAmount: orderData.totalAmount,
+          shippingService: orderData.shipping_service,
+          shippingFee: orderData.shipping_fee,
+          packageDimensions: orderData.package_dimensions,
+        }),
+      });
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      console.error("Create order error:", err);
+      return { success: false, error: "Erro ao criar pedido" };
     }
-    return { success: false, error: 'Pedido não encontrado' };
-  },
-  
-  getAdminUsers: async () => {
-    await delay(300);
-    const data = getData();
-    return data.users.map((u:any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, created_at: u.created_at })).sort((a:any, b:any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  },
-  
-  updateUser: async (id: number, updateData: any) => {
-    await delay(300);
-    const data = getData();
-    const userIndex = data.users.findIndex((u: any) => u.id === id);
-    if (userIndex !== -1) {
-      data.users[userIndex] = { ...data.users[userIndex], ...updateData };
-      saveData(data);
-      return { success: true, user: data.users[userIndex] };
-    }
-    return { success: false, error: 'Usuário não encontrado' };
   },
 
+  getUserOrders: async (email: string) => {
+    try {
+      const res = await fetch(
+        `${MEDUSA_URL}/store/orders-custom?email=${encodeURIComponent(email)}`,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-publishable-api-key": PUBLISHABLE_KEY,
+          },
+        }
+      );
+      return await res.json();
+    } catch (err) {
+      console.error("Get user orders error:", err);
+      return [];
+    }
+  },
+
+  // ============ SHIPPING (SuperFrete via Medusa backend) ============
   calculateShipping: async (cep: string, items: any[]) => {
-    const getDimensions = (item: any) => {
-      const title = item.title.toLowerCase();
-      if (title.includes('12000') || item.yards === 12000) return { height: 22, width: 22, length: 25, weight: 3.0 };
-      if (title.includes('6000') || item.yards === 6000) return { height: 19, width: 19, length: 25, weight: 1.0 };
-      if (title.includes('3000') || item.yards === 3000) return { height: 12, width: 12, length: 19, weight: 0.7 };
-      if (title.includes('2000') || item.yards === 2000) return { height: 12, width: 12, length: 19, weight: 0.5 };
-      if (title.includes('1000') || item.yards === 1000) return { height: 12, width: 12, length: 19, weight: 0.4 };
-      if (title.includes('500') || item.yards === 500) return { height: 12, width: 12, length: 19, weight: 0.3 };
-      return { height: 12, width: 12, length: 19, weight: 0.3 }; // Default fallback
-    };
-
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch('/api/superfrete/calculator', {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
-          'User-Agent': 'LojaOnline (kaykep7@gmail.com)',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          from: { postal_code: "74450380" }, // CEP de origem atualizado
-          to: { postal_code: cep.replace(/\D/g, '') },
-          services: "1,2,17",
-          options: {
-            own_hand: false,
-            receipt: false,
-            insurance_value: 0,
-            use_insurance_value: false
-          },
-          products: items.map(item => {
-            const dims = getDimensions(item);
-            return {
-              quantity: item.quantity,
-              height: dims.height,
-              length: dims.length,
-              width: dims.width,
-              weight: dims.weight
-            };
-          })
-        })
+      const products = items.map((item) => {
+        const shipping = item.shipping || item.metadata || {};
+        return {
+          quantity: item.quantity,
+          height: shipping.shipping_height || shipping.height || 12,
+          width: shipping.shipping_width || shipping.width || 12,
+          length: shipping.shipping_length || shipping.length || 19,
+          weight: shipping.shipping_weight || shipping.weight || 0.3,
+        };
       });
 
-      clearTimeout(timeoutId);
+      const res = await fetch(`${MEDUSA_URL}/store/shipping-quote`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-publishable-api-key": PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ cep, products }),
+      });
 
-      if (!response.ok) {
-        throw new Error('Erro ao calcular frete');
-      }
-
-      const data = await response.json();
-      return { success: true, options: data };
+      const data = await res.json();
+      return data;
     } catch (error) {
-      console.error('Erro no cálculo de frete:', error);
-      return { success: false, error: 'Não foi possível calcular o frete. Tente novamente.' };
+      console.error("Erro no cálculo de frete:", error);
+      return { success: false, error: "Não foi possível calcular o frete." };
     }
   },
 
-  generateShippingLabel: async (order: any) => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch('/api/superfrete/cart', {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NDk2MTksInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.nHdLf1cY16om5REAt2MLRuArwtlcU-8Ee3WEXcz2Trw',
-          'User-Agent': 'LojaOnline (kaykep7@gmail.com)',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          from: {
-            name: "Loja Dente de Tubarao",
-            address: "Rua Almeida Lara quadra 64 lt 14",
-            number: "SN",
-            district: "Capuava",
-            city: "Goiania",
-            state_abbr: "GO",
-            postal_code: "74450380",
-            document: "00000000000000"
-          },
-          to: {
-            name: order.customer_name,
-            address: order.customer_address.split(',')[0],
-            number: order.customer_address.split(',')[1]?.split('-')[0]?.trim() || "SN",
-            district: order.customer_address.split(',')[2]?.trim() || "Bairro",
-            city: order.customer_address.split(',')[3]?.split('-')[0]?.trim() || "Cidade",
-            state_abbr: order.customer_address.split('-')[1]?.split(',')[0]?.trim() || "SP",
-            postal_code: order.customer_address.match(/\d{5}-\d{3}/)?.[0]?.replace('-', '') || "00000000"
-          },
-          service: order.shipping_service || 1,
-          products: order.items.map((item: any) => ({
-            name: item.title,
-            quantity: item.quantity,
-            unitary_value: item.price
-          })),
-          volumes: order.package_dimensions || {
-            height: 12,
-            width: 12,
-            length: 19,
-            weight: 0.3
-          },
-          options: {
-            non_commercial: true
-          }
-        })
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error('Erro ao gerar etiqueta');
-      }
-
-      const data = await response.json();
-      return { success: true, label: data };
-    } catch (error) {
-      console.error('Erro na geração de etiqueta:', error);
-      return { success: false, error: 'Não foi possível gerar a etiqueta.' };
-    }
-  }
+  // ============ HELPERS ============
+  getMedusaUrl: () => MEDUSA_URL,
 };
