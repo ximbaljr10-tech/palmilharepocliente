@@ -241,7 +241,34 @@ export default function AdminOrders() {
     : statusFiltered;
 
   // Orders that have labels generated (superfrete_id) within the current filter
+  // FIXED: This is used for the counter display and the "quick PDF" button.
+  // It correctly shows ALL orders with labels in the current status filter.
   const ordersWithLabel = filteredOrders.filter(o => !!o.superfrete_id);
+
+  // Helper: Get current operational day boundaries for PDF filtering
+  const getOperationalDayBounds = () => {
+    const now = new Date();
+    const opStart = new Date(now);
+    // If current time < 6AM, operational day started yesterday at 00:00
+    if (now.getHours() < 6) {
+      opStart.setDate(opStart.getDate() - 1);
+    }
+    opStart.setHours(0, 0, 0, 0);
+
+    const opEnd = new Date(opStart);
+    opEnd.setDate(opEnd.getDate() + 1);
+    opEnd.setHours(6, 0, 0, 0); // Ends at 06:00 of the next calendar day
+    return { opStart, opEnd };
+  };
+
+  // Orders with labels from TODAY's operational day only (for quick PDF)
+  const ordersWithLabelToday = ordersWithLabel.filter(o => {
+    const labelDate = o.label_generated_at;
+    if (!labelDate) return false; // No label date = not from today
+    const d = new Date(labelDate);
+    const { opStart, opEnd } = getOperationalDayBounds();
+    return d >= opStart && d <= opEnd;
+  });
 
   // Calculate ideal balance for paid orders
   useEffect(() => {
@@ -625,10 +652,10 @@ export default function AdminOrders() {
     return doc.output('dataurlstring');
   };
 
-  // ============ PDF GENERATION (legacy — for current filter) ============
+  // ============ PDF GENERATION (quick — for current operational day only) ============
   const generatePDF = async () => {
-    if (ordersWithLabel.length === 0) {
-      alert('Nenhum pedido com etiqueta gerada neste filtro.');
+    if (ordersWithLabelToday.length === 0) {
+      alert('Nenhum pedido com etiqueta gerada no dia operacional atual.');
       return;
     }
     setGeneratingPDF(true);
@@ -636,13 +663,13 @@ export default function AdminOrders() {
       const now = new Date();
       const dateStr = now.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
       const fileDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const dataUrl = buildPDFForOrders(ordersWithLabel, dateStr);
+      const dataUrl = buildPDFForOrders(ordersWithLabelToday, dateStr);
       const fileName = `PEDIDOS-${fileDate}.pdf`;
       const filterLabel = STATUS_FILTERS.find(s => s.key === filter)?.label || 'Todos';
       const pdfEntry: GeneratedPDF = {
         id: `pdf_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         name: fileName, filter, filterLabel, date: now.toISOString(),
-        orderCount: ordersWithLabel.length, dataUrl,
+        orderCount: ordersWithLabelToday.length, dataUrl,
       };
       savePDF(pdfEntry);
       setSavedPDFs(getSavedPDFs());
@@ -728,7 +755,7 @@ export default function AdminOrders() {
             <div className="absolute right-0 top-full mt-1 bg-white border border-zinc-200 rounded-xl shadow-lg z-30 w-56 py-1 overflow-hidden">
               <button
                 onClick={generatePDF}
-                disabled={generatingPDF || ordersWithLabel.length === 0}
+                disabled={generatingPDF || ordersWithLabelToday.length === 0}
                 className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-700 hover:bg-zinc-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {generatingPDF ? (
@@ -737,15 +764,15 @@ export default function AdminOrders() {
                   <FileText size={15} className="text-zinc-400" />
                 )}
                 <div className="text-left">
-                  <span className="block">{generatingPDF ? 'Gerando...' : 'Gerar PDF'}</span>
-                  {ordersWithLabel.length > 0 && !generatingPDF && (
+                  <span className="block">{generatingPDF ? 'Gerando...' : 'Gerar PDF (Hoje)'}</span>
+                  {ordersWithLabelToday.length > 0 && !generatingPDF && (
                     <span className="block text-[10px] text-zinc-400 -mt-0.5">
-                      {ordersWithLabel.length} com etiqueta
+                      {ordersWithLabelToday.length} com etiqueta hoje
                     </span>
                   )}
-                  {ordersWithLabel.length === 0 && !generatingPDF && (
+                  {ordersWithLabelToday.length === 0 && !generatingPDF && (
                     <span className="block text-[10px] text-zinc-400 -mt-0.5">
-                      Nenhum com etiqueta
+                      Nenhum com etiqueta hoje
                     </span>
                   )}
                 </div>
@@ -1139,7 +1166,7 @@ export default function AdminOrders() {
             {STATUS_FILTERS.find(s => s.key === filter)?.label || filter} ({filteredOrders.length})
             {ordersWithLabel.length > 0 && (
               <span className="ml-2 text-emerald-500">
-                <Tag size={10} className="inline -mt-0.5" /> {ordersWithLabel.length} com etiqueta
+                <Tag size={10} className="inline -mt-0.5" /> {ordersWithLabelToday.length} hoje / {ordersWithLabel.length} total
               </span>
             )}
           </p>
@@ -1268,8 +1295,11 @@ function LabelDatePDFOverlay({
   const dateGroups: Record<string, { dateKey: string; dateLabel: string; orders: any[] }> = {};
 
   ordersWithLabels.forEach(order => {
-    // Use label_generated_at if available, otherwise fall back to updated_at
-    const labelDate = order.label_generated_at || order.updated_at || order.created_at;
+    // CRITICAL FIX: Only use label_generated_at for grouping.
+    // Fallback to created_at only if label_generated_at is missing (should not happen after backfill).
+    // NEVER use updated_at — it changes every time sync runs, causing orders to appear on wrong days.
+    const labelDate = order.label_generated_at || order.created_at;
+    if (!labelDate) return; // Skip orders with no date at all
     const { dateKey, dateLabel } = getOperationalDayKey(labelDate);
 
     if (!dateGroups[dateKey]) {
@@ -1628,8 +1658,9 @@ function LabelPrintOverlay({ allOrders, onClose }: { allOrders: any[]; onClose: 
 
   const dateGroups: Record<string, { dateKey: string; dateLabel: string; orders: any[] }> = {};
   ordersWithLabels.forEach(order => {
-    // Use label_generated_at first, then created_at (more stable than updated_at for grouping)
-    const labelDate = order.label_generated_at || order.created_at || order.updated_at;
+    // CRITICAL FIX: Only use label_generated_at for grouping.
+    // Fallback to created_at only if missing. NEVER use updated_at (changes on sync).
+    const labelDate = order.label_generated_at || order.created_at;
     const { dateKey, dateLabel } = getOperationalDayKey(labelDate);
     if (!dateGroups[dateKey]) dateGroups[dateKey] = { dateKey, dateLabel, orders: [] };
     dateGroups[dateKey].orders.push(order);
@@ -1662,12 +1693,34 @@ function LabelPrintOverlay({ allOrders, onClose }: { allOrders: any[]; onClose: 
         return;
       }
 
+      // Build order_info to send to backend for PDF header identification
+      const orderInfo = group.orders
+        .filter(o => o.superfrete_id)
+        .map(o => ({
+          superfrete_id: o.superfrete_id,
+          order_id: o.id,
+          customer_name: o.customer_name || '',
+          cep: o.address_components?.cep || '',
+        }));
+
       const result = await adminFetch('/admin/superfrete', {
         method: 'POST',
-        body: JSON.stringify({ action: 'print', orders: sfIds }),
+        body: JSON.stringify({ action: 'print', orders: sfIds, order_info: orderInfo }),
       });
 
-      if (result.success && result.data?.url) {
+      if (result.success && result.data?.pdf_base64) {
+        // Modified PDF returned as base64 — open as blob
+        const byteCharacters = atob(result.data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+      } else if (result.success && result.data?.url) {
+        // Fallback: open original SuperFrete URL
         window.open(result.data.url, '_blank');
       } else {
         setError(result.error || 'Erro ao obter link de impressao. Verifique se as etiquetas foram pagas.');

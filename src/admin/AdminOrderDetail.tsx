@@ -183,11 +183,31 @@ export default function AdminOrderDetail() {
   const printLabel = async () => {
     if (!order?.superfrete_id) return;
     try {
+      // Send order_info for PDF header identification
+      const orderInfo = [{
+        superfrete_id: order.superfrete_id,
+        order_id: order.id,
+        customer_name: order.customer_name || '',
+        cep: order.address_components?.cep || '',
+      }];
+
       const result = await adminFetch('/admin/superfrete', {
         method: 'POST',
-        body: JSON.stringify({ action: 'print', orders: [order.superfrete_id] }),
+        body: JSON.stringify({ action: 'print', orders: [order.superfrete_id], order_info: orderInfo }),
       });
-      if (result.success && result.data?.url) {
+
+      if (result.success && result.data?.pdf_base64) {
+        // Modified PDF returned as base64 — open as blob
+        const byteCharacters = atob(result.data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+      } else if (result.success && result.data?.url) {
         window.open(result.data.url, '_blank');
       } else {
         alert(result.error || 'Erro ao obter link de impressao');
