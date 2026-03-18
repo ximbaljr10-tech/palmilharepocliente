@@ -260,6 +260,19 @@ export default function Checkout() {
 
         {/* WhatsApp CTA */}
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-zinc-100 space-y-4">
+          {/* Preparation time notice - visible and clear */}
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center shrink-0">
+                <Package size={16} className="text-amber-600" />
+              </div>
+              <p className="text-sm font-bold text-amber-800">Prazo de preparação e postagem</p>
+            </div>
+            <p className="text-sm text-amber-700 leading-relaxed">
+              Após a confirmação do pagamento, seu pedido será preparado e postado em até <strong>3 dias úteis</strong>. O prazo de entrega dos Correios começa a contar a partir da postagem.
+            </p>
+          </div>
+
           <p className="text-zinc-700 text-sm leading-relaxed font-medium text-center">
             Envie o comprovante de pagamento pelo WhatsApp
           </p>
@@ -274,10 +287,6 @@ export default function Checkout() {
             <MessageCircle size={20} />
             Enviar Comprovante
           </a>
-
-          <p className="text-xs text-zinc-400 text-center">
-            Máximo de 3 dias úteis para preparação e postagem.
-          </p>
         </div>
 
         {/* Email tracking notice */}

@@ -20,7 +20,7 @@ export default function TrocasDevolucoes() {
           </ul>
           <h2>Como solicitar?</h2>
           <ol>
-            <li>Entre em contato pelo <strong>WhatsApp (62) 99357-6505</strong> informando o numero do pedido.</li>
+            <li>Entre em contato pelo <strong>WhatsApp (61) 99357-6505</strong> informando o numero do pedido.</li>
             <li>Envie fotos do produto recebido.</li>
             <li>Aguarde a analise (ate 2 dias uteis).</li>
             <li>Apos aprovacao, enviaremos as instrucoes para devolucao.</li>

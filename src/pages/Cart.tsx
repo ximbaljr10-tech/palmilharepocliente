@@ -313,7 +313,7 @@ export default function Cart() {
                       />
                       <div>
                         <p className="text-sm font-bold text-zinc-900">{opt.name}</p>
-                        <p className="text-xs text-zinc-500">Ate {opt.delivery_time} dias uteis</p>
+                        <p className="text-xs text-zinc-500">Ate {opt.delivery_time + 2} dias uteis</p>
                       </div>
                     </div>
                     <span className="font-bold text-zinc-900">R$ {opt.price.toFixed(2).replace('.', ',')}</span>

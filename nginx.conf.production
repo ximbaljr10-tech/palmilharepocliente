@@ -1,0 +1,327 @@
+# Dente de Tubarao - Production Nginx Configuration
+# Frontend (Vite build) + Medusa API reverse proxy
+# Domain: www.dentedetubarao.com.br
+
+# Rate limiting zones
+limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+limit_req_zone $binary_remote_addr zone=orders:10m rate=3r/s;
+limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=general:10m rate=60r/s;
+
+# Upstream Medusa backend (bound to 127.0.0.1 only)
+upstream medusa {
+    server 127.0.0.1:9000;
+    keepalive 32;
+}
+
+server {
+    server_name dentedetubarao.com.br www.dentedetubarao.com.br _;
+
+    # ACME challenge for Let's Encrypt
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    # Security headers (applied globally)
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://d1a9qnv764bsoo.cloudfront.net; font-src 'self' data:; connect-src 'self' https://wa.me https://www.dentedetubarao.com.br https://dentedetubarao.com.br https://viacep.com.br; frame-ancestors 'self'" always;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_min_length 256;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml application/font-woff2;
+
+    # Client body size (for file uploads to Medusa admin)
+    client_max_body_size 10M;
+
+    # Frontend static files
+    root /home/root/webapp/dist;
+    index index.html;
+
+    # =============================================
+    # STATIC ASSETS (highest priority, exact match)
+    # =============================================
+
+    # Static assets with immutable cache (hashed filenames from Vite build)
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # Product images with moderate cache
+    location /images/ {
+        expires 30d;
+        add_header Cache-Control "public";
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # =============================================
+    # MEDUSA API ROUTES (proxy to backend)
+    # Only specific API paths are proxied.
+    # Everything else goes to the SPA frontend.
+    # =============================================
+
+    # Medusa Admin Panel UI (dashboard)
+    # Uses its own relaxed CSP because /app loads dynamic scripts/styles
+    location /app {
+        limit_req zone=general burst=20 nodelay;
+
+        # Override global CSP — Medusa dashboard needs permissive policy
+        add_header Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'self'" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Medusa Admin API (protected by admin auth)
+    location /admin/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # Medusa Auth API (stricter rate limit to prevent brute force)
+    location /auth/ {
+        limit_req zone=auth burst=5 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Medusa Store API - products
+    location /store/products {
+        limit_req zone=api burst=30 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # Medusa Store API - customers
+    location /store/customers {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # Medusa Store API - orders (strict rate limit)
+    location /store/orders-custom {
+        limit_req zone=orders burst=3 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # SuperFrete Webhook (public endpoint, called by SuperFrete servers)
+    location /hooks {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # Medusa Store API - shipping quote (SuperFrete)
+    location /store/shipping-quote {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    # Medusa Store API - store config
+    location = /store/config {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Medusa Store API - carts (for the checkout flow)
+    location /store/carts {
+        limit_req zone=api burst=15 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Medusa Store API - payment collections (for checkout)
+    location /store/payment-collections {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Medusa Store API - regions
+    location /store/regions {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Medusa Store API - shipping options
+    location /store/shipping-options {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Medusa Health endpoint (used for monitoring, no rate limiting)
+    location /health {
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+
+    # Store Analytics (visit tracking) — proxied to Medusa backend
+    location /store/analytics {
+        limit_req zone=api burst=30 nodelay;
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 10s;
+    }
+
+    # =============================================
+    # SECURITY - block sensitive files
+    # =============================================
+
+    # Block direct access to hidden files (.env, .git, etc)
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+
+    # Block access to backup/sensitive files
+    location ~* \.(sql|bak|log|sh)$ {
+        deny all;
+        access_log off;
+    }
+
+    # =============================================
+    # SPA FALLBACK - everything else serves React app
+    # This handles /store/*, /store/cart, /store/admin, etc.
+    # =============================================
+    location / {
+        limit_req zone=general burst=30 nodelay;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Custom error pages
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+
+    listen [::]:443 ssl ipv6only=on; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    ssl_certificate /etc/letsencrypt/live/dentedetubarao.com.br/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/dentedetubarao.com.br/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+}
+
+
+server {
+    if ($host = www.dentedetubarao.com.br) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = dentedetubarao.com.br) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    listen [::]:80;
+    server_name dentedetubarao.com.br www.dentedetubarao.com.br _;
+
+    # Allow internal health checks
+    location /health {
+        proxy_pass http://medusa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+
+    return 301 https://dentedetubarao.com.br$request_uri;
+
+
+
+
+}

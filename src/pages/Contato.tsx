@@ -15,7 +15,7 @@ export default function Contato() {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <a
-            href="https://wa.me/5562993576505"
+            href="https://wa.me/5561993576505"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-4 bg-emerald-50 border border-emerald-100 rounded-2xl p-5 hover:border-emerald-300 transition-colors"
@@ -25,7 +25,7 @@ export default function Contato() {
             </div>
             <div>
               <p className="font-semibold text-zinc-900 text-sm">WhatsApp</p>
-              <p className="text-sm text-zinc-500">(62) 99357-6505</p>
+              <p className="text-sm text-zinc-500">(61) 99357-6505</p>
             </div>
           </a>
           <a

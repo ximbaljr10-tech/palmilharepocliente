@@ -284,13 +284,21 @@ export default function AdminOrderDetail() {
       y += 4;
 
       const items = order.items || [];
-      const tableData = items.map((item: any, i: number) => [
+      // Expand items: repeat each product line instead of using "3x" notation
+      const expandedItems: { title: string; price: number }[] = [];
+      items.forEach((item: any) => {
+        const qty = item.quantity || 1;
+        for (let q = 0; q < qty; q++) {
+          expandedItems.push({ title: item.title || 'Produto', price: Number(item.price || 0) });
+        }
+      });
+      const tableData = expandedItems.map((item, i) => [
         String(i + 1),
-        item.title || 'Produto',
-        String(item.quantity || 1),
-        `R$ ${formatCurrency(Number(item.price || 0))}`,
+        item.title,
+        '1',
+        `R$ ${formatCurrency(item.price)}`,
       ]);
-      const totalValue = items.reduce((sum: number, item: any) => sum + (Number(item.price || 0) * (item.quantity || 1)), 0);
+      const totalValue = expandedItems.reduce((sum, item) => sum + item.price, 0);
 
       autoTable(doc, {
         startY: y,
@@ -908,14 +916,7 @@ export default function AdminOrderDetail() {
                   <Printer size={14} />
                   Imprimir Etiqueta
                 </button>
-                <button
-                  onClick={generateDeclaration}
-                  disabled={generatingDecl}
-                  className="text-zinc-600 hover:text-zinc-700 border border-zinc-200 px-4 py-2 rounded-xl text-xs font-bold hover:bg-zinc-50 flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-                >
-                  <FileDown size={14} />
-                  {generatingDecl ? 'Gerando...' : 'Declaracao'}
-                </button>
+               
               </div>
             )}
             <div className="space-y-2">

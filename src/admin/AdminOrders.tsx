@@ -1883,18 +1883,7 @@ function LabelPrintOverlay({ allOrders, onClose }: { allOrders: any[]; onClose: 
                           )}
                           {printing === group.dateKey ? 'Abrindo...' : 'Etiquetas'}
                         </button>
-                        <button
-                          onClick={() => printDeclarationForDate(group)}
-                          disabled={generatingDecl === group.dateKey}
-                          className="bg-zinc-600 text-white px-3 py-1.5 rounded-xl text-[11px] font-bold hover:bg-zinc-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
-                        >
-                          {generatingDecl === group.dateKey ? (
-                            <Loader2 size={11} className="animate-spin" />
-                          ) : (
-                            <FileDown size={11} />
-                          )}
-                          {generatingDecl === group.dateKey ? 'Gerando...' : 'Declaracao'}
-                        </button>
+                       
                       </div>
                     </div>
                   </div>
