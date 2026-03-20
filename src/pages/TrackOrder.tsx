@@ -94,7 +94,7 @@ function PaymentInfo({ order }: { order: any }) {
       headers: { "x-publishable-api-key": "pk_b54130691636a84f3172ebbc1d0ac4d9b14bc2430db612d289a055e341b7b706" },
     })
       .then(r => r.json())
-      .then(setConfig)
+      .then(d => setConfig({ ...d, pix_banco: 'Banco Inter' }))
       .catch(() => {});
   }, []);
 

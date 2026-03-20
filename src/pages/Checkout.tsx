@@ -41,7 +41,7 @@ export default function Checkout() {
       .then(r => r.json())
       .then(d => setStoreConfig({
         pix_key: d.pix_key || '', pix_tipo: d.pix_tipo || 'CNPJ',
-        pix_nome: d.pix_nome || '', pix_banco: d.pix_banco || '',
+        pix_nome: d.pix_nome || '', pix_banco: 'Banco Inter',
         whatsapp: d.whatsapp || '',
       }))
       .catch(() => {});

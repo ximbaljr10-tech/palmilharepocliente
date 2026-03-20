@@ -485,16 +485,20 @@ export default function AdminOrders() {
           }
         }
 
-        const isFirstItem = itemIdx === 0;
-        const rowIdx = tableData.length;
+        // Expand items: repeat each product line instead of using "3x"
+        const qty = item.quantity || 1;
+        for (let q = 0; q < qty; q++) {
+          const isFirstItem = itemIdx === 0 && q === 0;
+          const rowIdx = tableData.length;
 
-        tableData.push([
-          isFirstItem ? `#${order.id}` : '',
-          isFirstItem ? shortName : '',
-          `${item.title}${item.quantity > 1 ? ` (${item.quantity}x)` : ''}`,
-        ]);
-        rowOrderIndex.push(orderIdx);
-        rowColorInfoMap.set(rowIdx, { colors: itemColors.slice(0, 3), isSortida, hasColorPref });
+          tableData.push([
+            isFirstItem ? `#${order.id}` : '',
+            isFirstItem ? shortName : '',
+            item.title,
+          ]);
+          rowOrderIndex.push(orderIdx);
+          rowColorInfoMap.set(rowIdx, { colors: itemColors.slice(0, 3), isSortida, hasColorPref });
+        }
       });
     });
 
@@ -1573,14 +1577,22 @@ function generateDeclarationPDF(ordersForDeclaration: any[]): string {
 
     // ---- ITEMS TABLE ----
     const items = order.items || [];
-    const tableData = items.map((item: any, i: number) => [
+    // Expand items: repeat each product line instead of using quantity notation
+    const expandedItems: { title: string; price: number }[] = [];
+    items.forEach((item: any) => {
+      const qty = item.quantity || 1;
+      for (let q = 0; q < qty; q++) {
+        expandedItems.push({ title: item.title || 'Produto', price: Number(item.price || 0) });
+      }
+    });
+    const tableData = expandedItems.map((item, i) => [
       String(i + 1),
-      item.title || 'Produto',
-      String(item.quantity || 1),
-      `R$ ${formatCurrency(Number(item.price || 0))}`,
+      item.title,
+      '1',
+      `R$ ${formatCurrency(item.price)}`,
     ]);
 
-    const totalValue = items.reduce((sum: number, item: any) => sum + (Number(item.price || 0) * (item.quantity || 1)), 0);
+    const totalValue = expandedItems.reduce((sum, item) => sum + item.price, 0);
 
     autoTable(doc, {
       startY: y,

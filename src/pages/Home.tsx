@@ -4,48 +4,10 @@ import { Product } from '../types';
 import { needsColorSelection } from '../types';
 import { useCart } from '../CartContext';
 import { api } from '../api';
-import { Search, Filter, Loader2, Pointer, Instagram } from 'lucide-react';
+import { Search, Filter, Loader2, Pointer } from 'lucide-react';
 
 const LOGO_URL = "https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0";
 
-// Instagram animated CTA component
-function InstagramCTA() {
-  const [phase, setPhase] = useState<'text' | 'icon'>('text');
-
-  useEffect(() => {
-    const timer = setTimeout(() => setPhase('icon'), 2000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
-    <a
-      href="https://www.instagram.com/dentedetubaraooficial"
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 text-sm font-medium text-pink-600 hover:text-pink-700 transition-colors overflow-hidden h-6"
-      title="@dentedetubaraooficial"
-    >
-      <span className="relative flex items-center h-full">
-        {phase === 'text' && (
-          <span
-            className="inline-flex items-center gap-1 whitespace-nowrap"
-            style={{ animation: 'ig-slide-left 0.4s ease-out forwards' }}
-          >
-            Nos siga
-          </span>
-        )}
-        {phase === 'icon' && (
-          <span
-            className="inline-flex items-center"
-            style={{ animation: 'ig-slide-right 0.4s ease-out forwards' }}
-          >
-            <Instagram size={18} className="text-pink-600" />
-          </span>
-        )}
-      </span>
-    </a>
-  );
-}
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const { addToCart } = useCart();
@@ -297,7 +259,17 @@ export default function Home() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <h1 className="text-3xl font-bold tracking-tight">Nossos Produtos</h1>
-          <InstagramCTA />
+          {/* Instagram CTA - mobile only (desktop version is in Header) */}
+          <a
+            href="https://www.instagram.com/dentedetubaraooficial"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="md:hidden instagram-cta"
+            title="@dentedetubaraooficial"
+          >
+            <span className="ig-text">Nos siga</span>
+            <svg className="ig-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+          </a>
         </div>
         
         <div className="flex flex-col sm:flex-row gap-3">
