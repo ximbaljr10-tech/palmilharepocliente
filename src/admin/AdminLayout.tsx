@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
-import { Menu, X, LayoutDashboard, Package, ShoppingBag, Archive, LogOut, BarChart3 } from 'lucide-react';
+import { Menu, X, LayoutDashboard, Package, ShoppingBag, Archive, LogOut, BarChart3, Mail } from 'lucide-react';
 import { MEDUSA_URL, logout } from './adminApi';
 import AdminLogin from './AdminLogin';
 
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { path: '/store/admin', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/store/admin/pedidos', label: 'Pedidos', icon: Package },
   { path: '/store/admin/produtos', label: 'Produtos', icon: ShoppingBag },
+  { path: '/store/admin/email', label: 'Email', icon: Mail },
   { path: '/store/admin/itens-vendidos', label: 'Itens Vendidos', icon: BarChart3 },
   { path: '/store/admin/arquivados', label: 'Arquivados', icon: Archive },
 ];

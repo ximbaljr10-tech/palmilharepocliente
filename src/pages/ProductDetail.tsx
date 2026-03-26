@@ -25,6 +25,10 @@ export default function ProductDetail() {
   const [underlineAnimPlayed, setUnderlineAnimPlayed] = useState(false);
   const prevColorCountRef = useRef(0);
 
+  // Floating bottom bar visibility — tracks if original buttons are out of viewport
+  const [showFloatingBar, setShowFloatingBar] = useState(false);
+  const buttonsRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!id) return;
     setLoading(true);
@@ -42,6 +46,17 @@ export default function ProductDetail() {
     }
     prevColorCountRef.current = selectedColors.length;
   }, [selectedColors.length, underlineAnimPlayed]);
+
+  // IntersectionObserver for floating bar — show when original buttons scroll out
+  useEffect(() => {
+    if (!buttonsRef.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowFloatingBar(!entry.isIntersecting),
+      { threshold: 0.1 }
+    );
+    observer.observe(buttonsRef.current);
+    return () => observer.disconnect();
+  }, [loading, product]);
 
   if (loading) {
     return (
@@ -294,7 +309,7 @@ export default function ProductDetail() {
           </div>
 
           {/* Quantity + Buy */}
-          <div className="space-y-4 mb-8">
+          <div ref={buttonsRef} className="space-y-4 mb-8">
             <div>
               <label className="block text-sm font-medium text-zinc-700 mb-2">Quantidade</label>
               <div className="flex items-center w-32 bg-zinc-50 border border-zinc-200 rounded-xl">
@@ -395,6 +410,68 @@ export default function ProductDetail() {
           </div>
         </div>
       </div>
+
+      {/* ============ FLOATING BOTTOM BAR ============ */}
+      {showFloatingBar && (
+        <div className="fixed bottom-0 inset-x-0 z-40 animate-slide-up-bar">
+          <div className="bg-white/95 backdrop-blur-lg border-t border-zinc-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+              {/* Price */}
+              <div className="hidden sm:block shrink-0">
+                <p className="text-lg font-bold text-zinc-900">
+                  R$ {product.price.toFixed(2).replace('.', ',')}
+                </p>
+                {quantity > 1 && (
+                  <p className="text-[10px] text-zinc-400">x{quantity}</p>
+                )}
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-2 flex-1 min-w-0">
+                {/* Add to Cart */}
+                <button
+                  onClick={handleAddToCart}
+                  disabled={isAdding || isBuying || !isColorValid}
+                  className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5 border ${
+                    !isColorValid
+                      ? 'border-zinc-200 text-zinc-400 cursor-not-allowed'
+                      : isAdding
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-zinc-300 text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50'
+                  }`}
+                >
+                  {isAdding ? (
+                    <><div className="w-3.5 h-3.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" /> Adicionado!</>
+                  ) : (
+                    <><ShoppingCart size={15} /> Carrinho</>
+                  )}
+                </button>
+
+                {/* Buy Now */}
+                <button
+                  onClick={handleBuyNow}
+                  disabled={isAdding || isBuying || !isColorValid}
+                  className={`flex-[1.3] py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    !isColorValid
+                      ? 'bg-zinc-300 text-zinc-500 cursor-not-allowed'
+                      : isBuying
+                        ? 'bg-emerald-700 text-white cursor-wait'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-600/20'
+                  }`}
+                >
+                  {isBuying ? (
+                    <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processando...</>
+                  ) : !isColorValid && requiresColor && colorMode === 'prioridade' ? (
+                    `Selecione ${maxColors - selectedColors.length} cor${maxColors - selectedColors.length > 1 ? 'es' : ''}`
+                  ) : (
+                    'Comprar Agora'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -14,20 +14,7 @@ export default function Contato() {
           Estamos disponiveis para atender voce! Entre em contato por qualquer um dos canais abaixo.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <a
-            href="https://wa.me/5561993576505"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-4 bg-emerald-50 border border-emerald-100 rounded-2xl p-5 hover:border-emerald-300 transition-colors"
-          >
-            <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
-              <MessageCircle size={22} className="text-emerald-600" />
-            </div>
-            <div>
-              <p className="font-semibold text-zinc-900 text-sm">WhatsApp</p>
-              <p className="text-sm text-zinc-500">(61) 99357-6505</p>
-            </div>
-          </a>
+
           <a
             href="mailto:Compras@dentedetubarao.com.br"
             className="flex items-center gap-4 bg-blue-50 border border-blue-100 rounded-2xl p-5 hover:border-blue-300 transition-colors"

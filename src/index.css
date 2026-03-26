@@ -78,6 +78,16 @@ html, body, #root {
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* Floating bottom bar animation for product page */
+@keyframes slide-up-bar {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-slide-up-bar {
+  animation: slide-up-bar 0.3s ease-out;
+}
+
 /* ── Color hint UX animations ── */
 
 /* Glass / light sweep that slides across an element */

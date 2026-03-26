@@ -17,15 +17,7 @@ export default function Footer() {
           <div>
             <p className="text-white font-bold text-sm mb-1.5">Dente de Tubarao</p>
             <div className="space-y-1">
-              <a
-                href="https://wa.me/5561993576505"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-emerald-400 transition-colors"
-              >
-                <MessageCircle size={12} className="text-emerald-500 shrink-0" />
-                (61) 99357-6505
-              </a>
+
               <a
                 href="mailto:Compras@dentedetubarao.com.br"
                 className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-emerald-400 transition-colors"

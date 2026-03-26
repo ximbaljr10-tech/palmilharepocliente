@@ -1,0 +1,56 @@
+MEDUSA_ADMIN_ONBOARDING_TYPE=default
+
+# CORS - production (port 80 via Nginx, port 9000 direct, localhost for dev)
+STORE_CORS=http://localhost:3000,http://localhost:5173,http://187.77.234.109,http://187.77.234.109:80,http://dentedetubarao.com.br,http://www.dentedetubarao.com.br,https://dentedetubarao.com.br,https://www.dentedetubarao.com.br
+ADMIN_CORS=http://localhost:9000,http://187.77.234.109,http://187.77.234.109:80,http://dentedetubarao.com.br,http://www.dentedetubarao.com.br,https://dentedetubarao.com.br,https://www.dentedetubarao.com.br
+AUTH_CORS=http://localhost:9000,http://localhost:3000,http://localhost:5173,http://187.77.234.109,http://187.77.234.109:80,http://dentedetubarao.com.br,http://www.dentedetubarao.com.br,https://dentedetubarao.com.br,https://www.dentedetubarao.com.br
+
+# SuperFrete
+# Set SUPERFRETE_AUTO_LABEL=true to auto-create shipping labels when order is marked as paid
+# Set to false (or omit) to skip auto-label creation (safe for testing)
+SUPERFRETE_AUTO_LABEL=true
+SUPERFRETE_API_BASE=https://api.superfrete.com/api/v0
+SUPERFRETE_CART_URL=https://api.superfrete.com/api/v0/cart
+SUPERFRETE_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzI4NTY5ODIsInN1YiI6Ik5hcHNWSTgxS0pZTTBaakhrRkFlMHZ1WTlObTEifQ.uaI_fPccNbpAVOjG9Socs2FXd_S9tfmdqAVcnM1eqvk
+SUPERFRETE_CEP_ORIGEM=74450380
+SUPERFRETE_SENDER_NAME=Loja Dente de Tubarao
+SUPERFRETE_SENDER_ADDRESS=Rua Almeida Lara quadra 64 lt 14
+SUPERFRETE_SENDER_NUMBER=SN
+SUPERFRETE_SENDER_DISTRICT=Capuava
+SUPERFRETE_SENDER_CITY=Goiania
+SUPERFRETE_SENDER_STATE=GO
+
+# Redis
+REDIS_URL=redis://default:5d52eb71b6a73a1a639817ee7d330a73@localhost:6379
+
+# Security - PRODUCTION SECRETS (never commit these)
+JWT_SECRET=23d682fed69722ea48272fd079b3f68f2802a70834deba77448371921b7696df132536b48f7aa9770eb495136968429f338eaf4602322ed7f85b44541494fd1e
+COOKIE_SECRET=72a541208b79b85a48c88d290e092876f5bc98a59fdf920220d1b7a24ab360e9a4f1dba6bdf0ffdfb571b75bb52d599fe6519c4df2ece95edbb53235bd1011ec
+
+# Database
+DATABASE_URL=postgresql://postgres:665a19359d272dc4007a533fa4e2b9e6@localhost:5432/medusa_db
+
+# Admin panel password (used by custom admin endpoint)
+ADMIN_PANEL_SECRET=29311fe81f11a7b09ca023902e39229a
+
+# Medusa backend URL (for admin dashboard - via Nginx)
+MEDUSA_BACKEND_URL=https://www.dentedetubarao.com.br
+
+# Admin credentials (used by backend for server-to-server operations)
+MEDUSA_ADMIN_EMAIL=compradentedetubarao@gmail.com
+MEDUSA_ADMIN_PASSWORD=dentetuba@L
+
+# Store config (dados reais)
+STORE_PIX_KEY=35959839000136
+STORE_PIX_TIPO=CNPJ
+STORE_PIX_NOME=Dente de Tubarão
+STORE_PIX_BANCO=Itaú Unibanco (341)
+STORE_WHATSAPP=5561991838736
+STORE_EMAIL=kaykep7@gmail.com
+
+# SMTP Email (Fastmail)
+SMTP_HOST=smtp.fastmail.com
+SMTP_PORT=587
+SMTP_USER=compras@dentedetubarao.com.br
+SMTP_PASS=7u9r967t9r3p6m6j
+SMTP_FROM="Dente de Tubarão" <compras@dentedetubarao.com.br>

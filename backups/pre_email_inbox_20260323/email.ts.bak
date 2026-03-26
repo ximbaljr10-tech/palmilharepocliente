@@ -1,0 +1,220 @@
+import nodemailer from "nodemailer"
+
+const STORE_NAME = "Dente de Tubarão"
+const STORE_WHATSAPP = process.env.STORE_WHATSAPP || "5561991838736"
+const STORE_PIX_KEY = process.env.STORE_PIX_KEY || "35959839000136"
+const STORE_PIX_TIPO = process.env.STORE_PIX_TIPO || "CNPJ"
+const STORE_PIX_NOME = process.env.STORE_PIX_NOME || "Dente de Tubarão"
+const STORE_PIX_BANCO = process.env.STORE_PIX_BANCO || "Itaú Unibanco (341)"
+const SMTP_HOST = process.env.SMTP_HOST || ""
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587")
+const SMTP_USER = process.env.SMTP_USER || ""
+const SMTP_PASS = process.env.SMTP_PASS || ""
+const SMTP_FROM = process.env.SMTP_FROM || `"${STORE_NAME}" <noreply@dentedetubarao.com.br>`
+
+function formatBRL(value: number | string): string {
+  return Number(value).toFixed(2).replace('.', ',')
+}
+
+function whatsappFormatted(): string {
+  return STORE_WHATSAPP.replace(/^55/, '').replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3')
+}
+
+function getTransporter() {
+  if (!SMTP_HOST || !SMTP_USER) {
+    console.warn("[EMAIL] SMTP não configurado. Emails não serão enviados.")
+    return null
+  }
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  })
+}
+
+function baseTemplate(title: string, content: string): string {
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;padding:20px;">
+    <!-- Header -->
+    <div style="background:#18181b;border-radius:16px 16px 0 0;padding:24px;text-align:center;">
+      <h1 style="color:#fff;margin:0;font-size:20px;letter-spacing:1px;">${STORE_NAME}</h1>
+    </div>
+    <!-- Content -->
+    <div style="background:#fff;padding:32px 24px;border-left:1px solid #e4e4e7;border-right:1px solid #e4e4e7;">
+      <h2 style="color:#18181b;font-size:22px;margin:0 0 16px;">${title}</h2>
+      ${content}
+    </div>
+    <!-- Footer -->
+    <div style="background:#fafafa;border-radius:0 0 16px 16px;padding:20px 24px;text-align:center;border:1px solid #e4e4e7;border-top:0;">
+      <p style="color:#a1a1aa;font-size:12px;margin:0;">
+        ${STORE_NAME} · Linhas de pesca profissionais<br>
+        WhatsApp: ${whatsappFormatted()}
+      </p>
+    </div>
+  </div>
+</body>
+</html>`
+}
+
+function itemsTable(items: any[]): string {
+  if (!items || items.length === 0) return ""
+  const rows = items.map(item =>
+    `<tr>
+      <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">
+        <span style="color:#18181b;font-size:14px;">${item.title || item.name || 'Produto'}</span><br>
+        <span style="color:#a1a1aa;font-size:12px;">Qtd: ${item.quantity}</span>
+      </td>
+      <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;text-align:right;white-space:nowrap;">
+        <span style="color:#18181b;font-weight:bold;font-size:14px;">R$ ${formatBRL(Number(item.price || item.unitary_value || 0) * item.quantity)}</span>
+      </td>
+    </tr>`
+  ).join('')
+  return `<table style="width:100%;border-collapse:collapse;margin:16px 0;">${rows}</table>`
+}
+
+// ====== EMAIL TEMPLATES ======
+
+export function emailPedidoRecebido(order: any): { subject: string; html: string } {
+  return {
+    subject: `Pedido #${order.display_id || order.id} recebido — ${STORE_NAME}`,
+    html: baseTemplate('Pedido Recebido! 🎉', `
+      <p style="color:#52525b;line-height:1.6;">
+        Olá, <strong>${order.customer_name}</strong>!
+      </p>
+      <p style="color:#52525b;line-height:1.6;">
+        Seu pedido <strong>#${order.display_id || order.id}</strong> foi recebido com sucesso.
+      </p>
+      ${itemsTable(order.items)}
+      <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:12px;padding:20px;margin:16px 0;">
+        <h3 style="color:#92400e;margin:0 0 12px;font-size:16px;">Aguardando Pagamento via PIX</h3>
+        <p style="color:#78350f;font-size:14px;margin:0 0 8px;">Chave Pix ${STORE_PIX_TIPO}: <strong style="font-size:16px;">${STORE_PIX_KEY}</strong></p>
+        <p style="color:#78350f;font-size:14px;margin:0 0 4px;">Nome: <strong>${STORE_PIX_NOME}</strong></p>
+        <p style="color:#78350f;font-size:14px;margin:0 0 4px;">Banco: <strong>${STORE_PIX_BANCO}</strong></p>
+        ${order.shipping_fee ? `<p style="color:#78350f;font-size:14px;margin:0 0 4px;">Frete: <strong>R$ ${formatBRL(order.shipping_fee)}</strong></p>` : ''}
+        <p style="color:#78350f;font-size:14px;margin:0;"><strong>Total: R$ ${formatBRL(order.total_amount)}</strong></p>
+      </div>
+      <p style="color:#52525b;line-height:1.6;font-size:14px;">
+        <strong>Para agilizar sua entrega</strong>, envie o comprovante de pagamento e o número do pedido para o WhatsApp:
+      </p>
+      <div style="text-align:center;margin:16px 0;">
+        <a href="https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(`Olá! Fiz o pedido #${order.display_id || order.id}. Segue comprovante:`)}" 
+          style="display:inline-block;background:#25D366;color:#fff;text-decoration:none;padding:14px 28px;border-radius:12px;font-weight:bold;font-size:16px;">
+          📱 Enviar Comprovante (${whatsappFormatted()})
+        </a>
+      </div>
+      <p style="color:#a1a1aa;font-size:12px;text-align:center;margin-top:16px;">
+        Máximo de 3 dias úteis para preparação e postagem após confirmação do pagamento.
+      </p>
+    `)
+  }
+}
+
+export function emailPagamentoConfirmado(order: any): { subject: string; html: string } {
+  return {
+    subject: `Pagamento confirmado — Pedido #${order.display_id || order.id} — ${STORE_NAME}`,
+    html: baseTemplate('Pagamento Confirmado! ✅', `
+      <p style="color:#52525b;line-height:1.6;">
+        Olá, <strong>${order.customer_name}</strong>!
+      </p>
+      <p style="color:#52525b;line-height:1.6;">
+        O pagamento do seu pedido <strong>#${order.display_id || order.id}</strong> foi confirmado. Estamos preparando sua encomenda.
+      </p>
+      ${itemsTable(order.items)}
+      <div style="background:#d1fae5;border:1px solid #34d399;border-radius:12px;padding:16px;text-align:center;">
+        ${order.shipping_fee ? `<p style="color:#065f46;font-size:14px;margin:0 0 4px;">Frete: R$ ${formatBRL(order.shipping_fee)}</p>` : ''}
+        <p style="color:#065f46;font-size:16px;font-weight:bold;margin:0;">Total pago: R$ ${formatBRL(order.total_amount)}</p>
+      </div>
+      <p style="color:#52525b;line-height:1.6;font-size:14px;margin-top:16px;">
+        Você receberá um novo e-mail assim que seu pedido for enviado, com o código de rastreio.
+      </p>
+    `)
+  }
+}
+
+export function emailPedidoEnviado(order: any, trackingCode: string): { subject: string; html: string } {
+  return {
+    subject: `Pedido #${order.display_id || order.id} enviado! — ${STORE_NAME}`,
+    html: baseTemplate('Pedido Enviado! 📦', `
+      <p style="color:#52525b;line-height:1.6;">
+        Olá, <strong>${order.customer_name}</strong>!
+      </p>
+      <p style="color:#52525b;line-height:1.6;">
+        Seu pedido <strong>#${order.display_id || order.id}</strong> foi despachado e está a caminho!
+      </p>
+      <div style="background:#dbeafe;border:1px solid #60a5fa;border-radius:12px;padding:20px;text-align:center;margin:16px 0;">
+        <p style="color:#1e40af;font-size:14px;margin:0 0 8px;font-weight:bold;">Código de Rastreio</p>
+        <p style="color:#1e3a8a;font-size:24px;font-family:monospace;font-weight:bold;margin:0;">${trackingCode}</p>
+        <a href="https://www.linkcorreios.com.br/?id=${trackingCode}" target="_blank" 
+          style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:bold;margin-top:12px;">
+          Rastrear nos Correios
+        </a>
+      </div>
+      ${itemsTable(order.items)}
+    `)
+  }
+}
+
+export function emailPedidoEntregue(order: any): { subject: string; html: string } {
+  return {
+    subject: `Pedido #${order.display_id || order.id} entregue — ${STORE_NAME}`,
+    html: baseTemplate('Pedido Entregue! 🎣', `
+      <p style="color:#52525b;line-height:1.6;">
+        Olá, <strong>${order.customer_name}</strong>!
+      </p>
+      <p style="color:#52525b;line-height:1.6;">
+        Seu pedido <strong>#${order.display_id || order.id}</strong> foi entregue com sucesso!
+      </p>
+      <div style="background:#d1fae5;border:1px solid #34d399;border-radius:12px;padding:20px;text-align:center;margin:16px 0;">
+        <p style="color:#065f46;font-size:18px;font-weight:bold;margin:0;">Obrigado por comprar com a gente! 🦈</p>
+      </div>
+      <p style="color:#52525b;line-height:1.6;font-size:14px;">
+        Esperamos que goste das suas linhas! Se tiver qualquer dúvida, fale com a gente no WhatsApp.
+      </p>
+      <div style="text-align:center;margin:16px 0;">
+        <a href="https://www.dentedetubarao.com.br/store" 
+          style="display:inline-block;background:#18181b;color:#fff;text-decoration:none;padding:12px 28px;border-radius:12px;font-weight:bold;font-size:14px;">
+          Comprar mais linhas →
+        </a>
+      </div>
+    `)
+  }
+}
+
+// ====== SEND EMAIL ======
+
+export async function sendOrderEmail(type: 'received' | 'paid' | 'shipped' | 'delivered', order: any, trackingCode?: string): Promise<boolean> {
+  try {
+    const transporter = getTransporter()
+    if (!transporter) {
+      console.log(`[EMAIL] SMTP não configurado. Email "${type}" para ${order.customer_email} não enviado.`)
+      return false
+    }
+
+    let emailData: { subject: string; html: string }
+    switch (type) {
+      case 'received': emailData = emailPedidoRecebido(order); break
+      case 'paid': emailData = emailPagamentoConfirmado(order); break
+      case 'shipped': emailData = emailPedidoEnviado(order, trackingCode || ''); break
+      case 'delivered': emailData = emailPedidoEntregue(order); break
+      default: return false
+    }
+
+    await transporter.sendMail({
+      from: SMTP_FROM,
+      to: order.customer_email,
+      subject: emailData.subject,
+      html: emailData.html,
+    })
+
+    console.log(`[EMAIL] "${type}" enviado para ${order.customer_email} (Pedido #${order.display_id || order.id})`)
+    return true
+  } catch (error: any) {
+    console.error(`[EMAIL] Erro ao enviar "${type}" para ${order.customer_email}:`, error.message)
+    return false
+  }
+}
