@@ -66,13 +66,24 @@ export default function AdminLayout() {
 
   // Close menu on click outside
   useEffect(() => {
+    if (!menuOpen) return;
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
-    if (menuOpen) document.addEventListener('mousedown', handleClick);
+    document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
+
+  // Close menu on ESC key
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
   }, [menuOpen]);
 
   // Close menu on route change
@@ -107,7 +118,7 @@ export default function AdminLayout() {
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               className="p-2 rounded-xl hover:bg-zinc-100 transition-colors relative"
-              aria-label="Menu"
+              aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}
             >
               {menuOpen ? <X size={20} className="text-zinc-600" /> : <Menu size={20} className="text-zinc-600" />}
             </button>
@@ -117,8 +128,15 @@ export default function AdminLayout() {
               <>
                 <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setMenuOpen(false)} />
                 <nav className="absolute top-14 left-4 bg-white border border-zinc-200 rounded-2xl shadow-xl z-50 w-64 py-2 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-zinc-100">
+                  <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between">
                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Menu Admin</p>
+                    <button
+                      onClick={() => setMenuOpen(false)}
+                      className="p-1 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors"
+                      aria-label="Fechar menu"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
                   {NAV_ITEMS.map(item => {
                     const Icon = item.icon;
