@@ -7,15 +7,6 @@ html, body, #root {
   max-width: 100vw;
 }
 
-/* Hide scrollbar but keep scroll functionality (for filter chips) */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
 @keyframes loading-bar {
   0% { width: 0%; margin-left: 0; }
   50% { width: 70%; margin-left: 15%; }

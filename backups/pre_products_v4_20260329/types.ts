@@ -123,16 +123,11 @@ export function getColorsForProduct(product: Product): ColorLineItem[] {
   const adminColors = product.metadata?.available_colors;
   if (Array.isArray(adminColors) && adminColors.length > 0) {
     // Admin has configured colors — show only in-stock ones
-    // This is THE source of truth when present
     return adminColors
       .filter((c: any) => c.in_stock !== false) // Include if in_stock is true or undefined
       .map((c: any) => ({
         name: c.name,
-        hex: c.hex || LINE_COLORS.find(lc => 
-          lc.name === c.name || 
-          lc.name.toLowerCase() === (c.name || '').toLowerCase() ||
-          lc.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '') === (c.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        )?.hex || '#9ca3af',
+        hex: c.hex || LINE_COLORS.find(lc => lc.name === c.name)?.hex || '#9ca3af',
       }));
   }
   // Fallback: group-based defaults
@@ -152,7 +147,6 @@ export const LINE_COLORS: ColorLineItem[] = [
   { name: 'Amarela', hex: '#eab308' },
   { name: 'Rosa', hex: '#ec4899' },
   { name: 'Lilás', hex: '#a855f7' },
-  { name: 'Lilas', hex: '#a855f7' }, // Alias without accent (admin saves this)
   { name: 'Azul', hex: '#3b82f6' },
   { name: 'Cinza', hex: '#9ca3af' },
   { name: 'Marrom', hex: '#92400e' },

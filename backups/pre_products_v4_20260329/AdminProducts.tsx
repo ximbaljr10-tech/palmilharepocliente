@@ -2,15 +2,14 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import {
   Search, Save, X, Loader2, RefreshCw, Palette, Plus, Minus,
   ChevronDown, ChevronRight, Check, CheckSquare, Square,
-  Eye, EyeOff, Filter, Package, AlertTriangle,
-  MinusSquare, Globe, GlobeLock,
-  SlidersHorizontal,
-  ChevronUp, DollarSign, Ruler, Weight,
-  PlusCircle, Camera, Pencil, Info, Upload, ArrowLeft, ChevronLeft,
-  Folder, FolderPlus
+  Eye, EyeOff, Filter, Package, Layers, AlertTriangle,
+  ArrowUpDown, MinusSquare, Edit3, Globe, GlobeLock,
+  Archive, RotateCcw, Trash2, MoreHorizontal, SlidersHorizontal,
+  ChevronUp, Copy, Tag, ImagePlus, DollarSign, Ruler, Weight,
+  PlusCircle, Camera, Pencil, Info
 } from 'lucide-react';
-import { adminFetch, MEDUSA_URL } from './adminApi';
-import { LINE_COLORS, getColorsForProduct, getDefaultColorsForGroup, getColorGroupName, needsColorSelection, SKIP_COLOR_YARDS } from '../types';
+import { adminFetch } from './adminApi';
+import { LINE_COLORS, getColorsForProduct, getDefaultColorsForGroup, getColorGroupName, isNylonEsportiva, isKingLine, needsColorSelection, SKIP_COLOR_YARDS } from '../types';
 
 // ============ TYPES ============
 interface ColorItem {
@@ -29,9 +28,6 @@ interface ProductData {
   thumbnail: string;
   images: { id?: string; url: string }[];
   variants: any[];
-  collection_id?: string;
-  collection?: { id: string; title: string; handle: string } | null;
-  categories?: { id: string; name: string }[];
 }
 
 interface ParsedProduct extends ProductData {
@@ -46,7 +42,7 @@ interface ParsedProduct extends ProductData {
   _isLine: boolean;
   _needsColorSelection: boolean;
   _colorConfigKey: string;
-  _colorSource: 'metadata' | 'derived' | 'none';
+  _colorSource: 'metadata' | 'derived' | 'none'; // tracks where colors came from
   _variantId: string | null;
   _priceId: string | null;
   _shippingHeight: number | null;
@@ -96,40 +92,36 @@ function getDefaultShipping(yards: number | null, title: string): { height: numb
   }
 }
 
-// ============ GROUP DETECTION (source of truth) ============
-function detectGroup(title: string, metadata: Record<string, any>): string {
-  // If metadata has an explicit group, use that
-  if (metadata?.grupo) return metadata.grupo;
-  
-  const t = (title || '').toUpperCase();
-  if (/CARRETILHA/i.test(t)) return 'Carretilhas';
-  if (/CAMIS/i.test(t)) return 'Camisas';
-  if (/BON[EÉ]/i.test(t)) return 'Bones';
-  if (/MALETA/i.test(t)) return 'Acessorios';
-  if (/KING\s*SHARK/i.test(t)) return 'King Shark';
-  if (/SHARK\s*ATTACK/i.test(t)) return 'Shark Attack';
-  if (/INDON[EÉ]SIA/i.test(t) || (/\.50/i.test(t) && /FAMOSA/i.test(t))) return 'Indonesia .50';
-  if (/LINHA\s*PURA|PURA/i.test(t) && !(/CARRETILHA|CAMIS|BON/i.test(t))) return 'Linha Pura';
-  
-  const yardsMatch = title.match(/(\d+)\s*(j|jds|jardas)\b/i);
-  if (yardsMatch) return 'Dente de Tubarao';
-  
-  return 'Outros';
-}
-
 // ============ PRODUCT PARSING ============
+// KEY FIX: When metadata.available_colors is empty for a line product that needs
+// color selection, we DERIVE the colors from getColorsForProduct() — the SAME 
+// logic the public store uses. This ensures the admin reflects reality.
 function parseProduct(p: ProductData): ParsedProduct {
   const title = p.title || '';
   const metadata = p.metadata || {};
   const variant = p.variants?.[0];
 
+  // Extract yards
   const yardsMatch = title.match(/(\d+)\s*(j|jds|jardas)\b/i);
   const yards = yardsMatch ? parseInt(yardsMatch[1], 10) : null;
 
+  // Extract fio
   const fioMatch = title.match(/[Ff]io\s+([\d.]+)/);
   const fio = fioMatch ? fioMatch[1] : null;
 
-  const group = detectGroup(title, metadata);
+  // Determine group
+  let group = 'Outros';
+  const titleUpper = title.toUpperCase();
+  if (/CARRETILHA/i.test(titleUpper)) group = 'Carretilhas';
+  else if (/CAMIS/i.test(titleUpper)) group = 'Camisas';
+  else if (/BON[EÉ]/i.test(titleUpper)) group = 'Bones';
+  else if (/MALETA/i.test(titleUpper)) group = 'Acessorios';
+  else if (/KING\s*SHARK/i.test(titleUpper)) group = 'King Shark';
+  else if (/SHARK\s*ATTACK/i.test(titleUpper)) group = 'Shark Attack';
+  else if (/INDON[EÉ]SIA/i.test(titleUpper) || (/\.50/i.test(titleUpper) && /FAMOSA/i.test(titleUpper))) group = 'Indonesia .50';
+  else if (/LINHA\s*PURA|PURA/i.test(titleUpper) && !(/CARRETILHA|CAMIS|BON/i.test(titleUpper))) group = 'Linha Pura';
+  else if (yards !== null) group = 'Dente de Tubarao';
+
   const isLine = yards !== null;
 
   // Price
@@ -147,37 +139,47 @@ function parseProduct(p: ProductData): ParsedProduct {
     priceDisplay = price.toFixed(2).replace('.', ',');
   }
 
+  // Stock
   const stock = variant?.inventory_quantity ?? null;
 
-  // Color group detection
+  // Color group detection - using same logic as public store
   const fakeProduct = { title, handle: p.handle, yards, metadata } as any;
   const colorGroup = getColorGroupName(fakeProduct);
+  
+  // Check if needs color selection (same logic as store)
   const needsColor = needsColorSelection(fakeProduct);
 
-  // COLOR SOURCE OF TRUTH: metadata.available_colors
+  // ==== KEY FIX: COLOR PRE-FILLING ====
+  // The store determines available colors via getColorsForProduct() (title-based).
+  // If metadata.available_colors is populated, use that (admin has saved custom config).
+  // If it's empty BUT the product needs color selection, derive from store logic.
   let availableColors: ColorItem[] = [];
   let colorSource: 'metadata' | 'derived' | 'none' = 'none';
 
   const metadataColors: ColorItem[] = metadata.available_colors || [];
   
   if (metadataColors.length > 0) {
+    // Admin has explicitly saved colors for this product
     availableColors = metadataColors;
     colorSource = 'metadata';
   } else if (isLine && needsColor) {
+    // DERIVE from the same default group logic the public store uses
     const storeColors = getDefaultColorsForGroup(fakeProduct);
     availableColors = storeColors.map(c => ({
       name: c.name,
       hex: c.hex,
-      in_stock: true,
+      in_stock: true, // Default all to in-stock when deriving
     }));
     colorSource = 'derived';
   }
 
+  // Build a config key for intelligent grouping
   const colorConfigKey = availableColors
     .map(c => `${c.name}:${c.in_stock ? '1' : '0'}`)
     .sort()
     .join('|') || 'NONE';
 
+  // Shipping dimensions (from metadata or defaults)
   const defaultShipping = getDefaultShipping(yards, title);
 
   return {
@@ -265,55 +267,9 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
   );
 }
 
-// ============ IMAGE UPLOAD HELPER ============
-async function uploadImageToMedusa(file: File): Promise<{ url: string }> {
-  const token = localStorage.getItem('admin_token');
-  if (!token) throw new Error('Nao autenticado');
-
-  const formData = new FormData();
-  formData.append('files', file);
-
-  const res = await fetch(`${MEDUSA_URL}/admin/uploads`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-    },
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Erro ao fazer upload: ${res.status} ${errText.slice(0, 100)}`);
-  }
-
-  const data = await res.json();
-  
-  // Medusa v2 returns { files: [{ id, url }] }
-  if (data.files && data.files.length > 0) {
-    return { url: data.files[0].url };
-  }
-  
-  throw new Error('Resposta inesperada do servidor de upload');
-}
-
-// File validation
-function validateImageFile(file: File): string | null {
-  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-  const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
-  
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return `Tipo de arquivo nao permitido: ${file.type}. Use JPG, PNG, WebP, GIF ou AVIF.`;
-  }
-  if (file.size > MAX_SIZE) {
-    return `Arquivo muito grande (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximo: 10MB.`;
-  }
-  return null;
-}
-
-// ============ FULL-SCREEN PRODUCT EDITOR ============
-function ProductEditor({ product, allGroups, onSave, onClose, saving }: {
+// ============ PRODUCT EDIT MODAL ============
+function ProductEditModal({ product, onSave, onClose, saving }: {
   product: ParsedProduct | null; // null = new product
-  allGroups: string[];
   onSave: (data: any) => void;
   onClose: () => void;
   saving: boolean;
@@ -328,20 +284,9 @@ function ProductEditor({ product, allGroups, onSave, onClose, saving }: {
   const [shWidth, setShWidth] = useState(String(product?._shippingWidth || ''));
   const [shLength, setShLength] = useState(String(product?._shippingLength || ''));
   const [shWeight, setShWeight] = useState(String(product?._shippingWeight || ''));
-  const [images, setImages] = useState<{ id?: string; url: string; file?: File }[]>(product?.images || []);
+  const [newImageUrl, setNewImageUrl] = useState('');
+  const [images, setImages] = useState<{ id?: string; url: string }[]>(product?.images || []);
   const [errors, setErrors] = useState<string[]>([]);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Group field
-  const [grupo, setGrupo] = useState(product?.metadata?.grupo || product?._group || '');
-  const [showNewGroup, setShowNewGroup] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
-
-  // Color editor (integrated into editor for line products)
-  const needsColor = product ? product._needsColorSelection : false;
-  const [colors, setColors] = useState<ColorItem[]>(product?._availableColors || []);
-  const [colorChanged, setColorChanged] = useState(false);
 
   const handleAutoHandle = (t: string) => {
     if (isNew || !product?.handle) {
@@ -353,59 +298,20 @@ function ProductEditor({ product, allGroups, onSave, onClose, saving }: {
     }
   };
 
-  // Real file upload handler
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    setUploadingImage(true);
+  const addImage = () => {
+    const url = newImageUrl.trim();
+    if (!url) return;
+    if (!url.startsWith('http')) {
+      setErrors(['URL da imagem deve comecar com http:// ou https://']);
+      return;
+    }
+    setImages(prev => [...prev, { url }]);
+    setNewImageUrl('');
     setErrors([]);
-    
-    const newErrors: string[] = [];
-    const newImages: { url: string }[] = [];
-    
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const validationError = validateImageFile(file);
-      if (validationError) {
-        newErrors.push(`${file.name}: ${validationError}`);
-        continue;
-      }
-      
-      try {
-        const result = await uploadImageToMedusa(file);
-        newImages.push(result);
-      } catch (err: any) {
-        newErrors.push(`${file.name}: ${err.message}`);
-      }
-    }
-    
-    if (newImages.length > 0) {
-      setImages(prev => [...prev, ...newImages]);
-    }
-    if (newErrors.length > 0) {
-      setErrors(newErrors);
-    }
-    
-    setUploadingImage(false);
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
   };
 
   const removeImage = (idx: number) => {
     setImages(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const moveImage = (from: number, to: number) => {
-    if (to < 0 || to >= images.length) return;
-    setImages(prev => {
-      const next = [...prev];
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      return next;
-    });
   };
 
   const handleSubmit = () => {
@@ -413,8 +319,6 @@ function ProductEditor({ product, allGroups, onSave, onClose, saving }: {
     if (!title.trim()) errs.push('Titulo obrigatorio');
     if (!price || Number(price) <= 0) errs.push('Preco invalido');
     if (errs.length > 0) { setErrors(errs); return; }
-
-    const finalGroup = showNewGroup && newGroupName.trim() ? newGroupName.trim() : grupo;
 
     onSave({
       title: title.trim(),
@@ -427,438 +331,223 @@ function ProductEditor({ product, allGroups, onSave, onClose, saving }: {
       shipping_length: Number(shLength) || null,
       shipping_weight: Number(shWeight) || null,
       images: images.map(i => i.url),
-      grupo: finalGroup,
-      colors: colorChanged ? colors : undefined,
       isNew,
     });
   };
 
-  // Get group colors for the current product (for color suggestions)
-  const fakeP = { title, handle, yards: (() => {
-    const m = title.match(/(\d+)\s*(j|jds|jardas)\b/i);
-    return m ? parseInt(m[1], 10) : null;
-  })() } as any;
-  const groupColors = getDefaultColorsForGroup(fakeP);
-
   return (
-    <div className="fixed inset-0 bg-zinc-50 z-50 flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-zinc-200 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0 shadow-sm">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl transition-colors">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h2 className="text-base sm:text-lg font-bold text-zinc-900 flex items-center gap-2">
-              {isNew ? <PlusCircle size={20} className="text-emerald-600" /> : <Pencil size={20} className="text-blue-600" />}
-              {isNew ? 'Novo Produto' : 'Editar Produto'}
-            </h2>
-            {!isNew && <p className="text-[11px] text-zinc-400 truncate max-w-[250px] sm:max-w-none">{product?.title}</p>}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="bg-blue-600 text-white px-4 sm:px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 transition-colors shadow-sm"
-          >
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-            <span className="hidden sm:inline">{saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar'}</span>
-            <span className="sm:hidden">{saving ? '...' : 'Salvar'}</span>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-zinc-100 px-5 py-4 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
+            {isNew ? <PlusCircle size={18} className="text-emerald-600" /> : <Pencil size={18} className="text-blue-600" />}
+            {isNew ? 'Novo Produto' : 'Editar Produto'}
+          </h3>
+          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl">
+            <X size={18} />
           </button>
         </div>
-      </div>
 
-      {/* Body - scrollable */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {errors.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 space-y-1">
+            <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
               {errors.map((e, i) => <p key={i}>{e}</p>)}
-              <button onClick={() => setErrors([])} className="text-red-500 text-xs underline mt-1">Fechar</button>
             </div>
           )}
 
-          {/* Two-column layout on desktop */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* LEFT COLUMN: Core info */}
-            <div className="space-y-5">
-              {/* Section: Basic Info */}
-              <div className="bg-white rounded-2xl border border-zinc-200 p-5 space-y-4 shadow-sm">
-                <h3 className="text-sm font-bold text-zinc-800 flex items-center gap-2">
-                  <Package size={16} className="text-zinc-500" />
-                  Informacoes Basicas
-                </h3>
+          {/* Title */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Titulo *</label>
+            <input
+              value={title}
+              onChange={e => { setTitle(e.target.value); handleAutoHandle(e.target.value); }}
+              className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              placeholder="Ex: SHARK ATTACK 3000j Fio 4.4"
+            />
+          </div>
 
-                {/* Title */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Titulo *</label>
-                  <input
-                    value={title}
-                    onChange={e => { setTitle(e.target.value); handleAutoHandle(e.target.value); }}
-                    className="w-full px-3.5 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                    placeholder="Ex: SHARK ATTACK 3000j Fio 4.4"
-                  />
-                </div>
+          {/* Handle */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Handle (URL)</label>
+            <input
+              value={handle}
+              onChange={e => setHandle(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm font-mono text-zinc-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              placeholder="shark-attack-3000j"
+            />
+          </div>
 
-                {/* Handle */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Handle (URL)</label>
-                  <input
-                    value={handle}
-                    onChange={e => setHandle(e.target.value)}
-                    className="w-full px-3.5 py-3 rounded-xl border border-zinc-200 text-sm font-mono text-zinc-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                    placeholder="shark-attack-3000j"
-                  />
-                </div>
-
-                {/* Price */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <DollarSign size={11} /> Preco (R$) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={price}
-                    onChange={e => setPrice(e.target.value)}
-                    className="w-full px-3.5 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                    placeholder="45.90"
-                  />
-                </div>
-
-                {/* Status */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Status</label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setStatus('published')}
-                      className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                        status === 'published' ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'
-                      }`}
-                    >
-                      <Eye size={14} className="inline mr-1.5" />
-                      Publicado
-                    </button>
-                    <button
-                      onClick={() => setStatus('draft')}
-                      className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                        status === 'draft' ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300'
-                      }`}
-                    >
-                      <EyeOff size={14} className="inline mr-1.5" />
-                      Rascunho
-                    </button>
-                  </div>
-                </div>
-
-                {/* Group / Grupo */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Folder size={11} /> Grupo
-                  </label>
-                  {!showNewGroup ? (
-                    <div className="flex gap-2">
-                      <select
-                        value={grupo}
-                        onChange={e => setGrupo(e.target.value)}
-                        className="flex-1 px-3.5 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-white"
-                      >
-                        <option value="">Detectar automaticamente</option>
-                        {allGroups.map(g => (
-                          <option key={g} value={g}>{g}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => setShowNewGroup(true)}
-                        className="px-3 py-2 rounded-xl border border-dashed border-zinc-300 text-zinc-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/50 transition-all text-xs font-medium flex items-center gap-1"
-                        title="Criar novo grupo"
-                      >
-                        <FolderPlus size={14} />
-                        Novo
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input
-                        value={newGroupName}
-                        onChange={e => setNewGroupName(e.target.value)}
-                        className="flex-1 px-3.5 py-3 rounded-xl border border-blue-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-blue-50/30"
-                        placeholder="Nome do novo grupo..."
-                        autoFocus
-                      />
-                      <button
-                        onClick={() => { setShowNewGroup(false); setNewGroupName(''); }}
-                        className="px-3 py-2 rounded-xl border border-zinc-200 text-zinc-500 hover:text-zinc-700 transition-all text-xs"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  )}
-                  <p className="text-[10px] text-zinc-400 mt-1">
-                    Se vazio, o grupo sera detectado pelo titulo do produto
-                  </p>
-                </div>
-
-                {/* Description */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Descricao (HTML)</label>
-                  <textarea
-                    value={description}
-                    onChange={e => setDescription(e.target.value)}
-                    rows={4}
-                    className="w-full px-3.5 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all"
-                    placeholder="Descricao do produto..."
-                  />
-                </div>
-              </div>
-
-              {/* Section: Shipping */}
-              <div className="bg-white rounded-2xl border border-zinc-200 p-5 space-y-4 shadow-sm">
-                <h3 className="text-sm font-bold text-zinc-800 flex items-center gap-2">
-                  <Ruler size={16} className="text-zinc-500" />
-                  Dimensoes e Peso (SuperFrete)
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-medium text-zinc-400 mb-1">Altura (cm)</label>
-                    <input
-                      type="number" step="0.1" min="0"
-                      value={shHeight}
-                      onChange={e => setShHeight(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="12"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-medium text-zinc-400 mb-1">Largura (cm)</label>
-                    <input
-                      type="number" step="0.1" min="0"
-                      value={shWidth}
-                      onChange={e => setShWidth(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="12"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-medium text-zinc-400 mb-1">Comprimento (cm)</label>
-                    <input
-                      type="number" step="0.1" min="0"
-                      value={shLength}
-                      onChange={e => setShLength(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="19"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-medium text-zinc-400 mb-1">Peso (kg)</label>
-                    <input
-                      type="number" step="0.01" min="0"
-                      value={shWeight}
-                      onChange={e => setShWeight(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="0.5"
-                    />
-                  </div>
-                </div>
-                <p className="text-[10px] text-zinc-400 flex items-center gap-1">
-                  <Info size={10} /> Estas dimensoes sao usadas pelo SuperFrete para calcular o frete
-                </p>
-              </div>
-            </div>
-
-            {/* RIGHT COLUMN: Images + Colors */}
-            <div className="space-y-5">
-              {/* Section: Images */}
-              <div className="bg-white rounded-2xl border border-zinc-200 p-5 space-y-4 shadow-sm">
-                <h3 className="text-sm font-bold text-zinc-800 flex items-center gap-2">
-                  <Camera size={16} className="text-zinc-500" />
-                  Imagens
-                  {images.length > 0 && <span className="text-[10px] text-zinc-400 font-normal">({images.length})</span>}
-                </h3>
-
-                {/* Image grid */}
-                {images.length > 0 && (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {images.map((img, idx) => (
-                      <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden bg-zinc-100 border border-zinc-200">
-                        <img
-                          src={img.url}
-                          alt={`Img ${idx + 1}`}
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        {/* Overlay controls */}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
-                          {idx > 0 && (
-                            <button
-                              onClick={() => moveImage(idx, idx - 1)}
-                              className="w-7 h-7 bg-white/90 rounded-lg flex items-center justify-center text-zinc-700 hover:bg-white shadow-sm"
-                              title="Mover para esquerda"
-                            >
-                              <ChevronLeft size={14} />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => removeImage(idx)}
-                            className="w-7 h-7 bg-red-500/90 rounded-lg flex items-center justify-center text-white hover:bg-red-600 shadow-sm"
-                            title="Remover"
-                          >
-                            <X size={14} />
-                          </button>
-                          {idx < images.length - 1 && (
-                            <button
-                              onClick={() => moveImage(idx, idx + 1)}
-                              className="w-7 h-7 bg-white/90 rounded-lg flex items-center justify-center text-zinc-700 hover:bg-white shadow-sm"
-                              title="Mover para direita"
-                            >
-                              <ChevronRight size={14} />
-                            </button>
-                          )}
-                        </div>
-                        {idx === 0 && (
-                          <span className="absolute bottom-0 left-0 right-0 bg-blue-600/80 text-white text-[9px] text-center py-0.5 font-semibold">
-                            Principal
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Upload button */}
-                <div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-                    multiple
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingImage}
-                    className="w-full border-2 border-dashed border-zinc-300 hover:border-blue-400 rounded-xl py-6 flex flex-col items-center justify-center gap-2 text-zinc-500 hover:text-blue-600 hover:bg-blue-50/30 transition-all disabled:opacity-50 cursor-pointer"
-                  >
-                    {uploadingImage ? (
-                      <>
-                        <Loader2 size={24} className="animate-spin text-blue-500" />
-                        <span className="text-xs font-medium text-blue-600">Fazendo upload...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={24} />
-                        <span className="text-xs font-medium">Clique para selecionar imagens</span>
-                        <span className="text-[10px] text-zinc-400">JPG, PNG, WebP, GIF - Max 10MB cada</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Section: Colors (for line products) */}
-              {(needsColor || (isNew && title)) && (() => {
-                const currentYards = (() => {
-                  const m = title.match(/(\d+)\s*(j|jds|jardas)\b/i);
-                  return m ? parseInt(m[1], 10) : null;
-                })();
-                const showColors = currentYards !== null && !SKIP_COLOR_YARDS.includes(currentYards);
-                
-                if (!showColors && !needsColor) return null;
-                
-                return (
-                  <div className="bg-white rounded-2xl border border-zinc-200 p-5 space-y-4 shadow-sm">
-                    <h3 className="text-sm font-bold text-zinc-800 flex items-center gap-2">
-                      <Palette size={16} className="text-purple-600" />
-                      Cores Disponiveis na Loja
-                      {product && <ColorSourceBadge source={product._colorSource} />}
-                    </h3>
-
-                    {product?._colorSource === 'derived' && !colorChanged && (
-                      <p className="text-[11px] text-blue-600 bg-blue-50 rounded-lg px-3 py-2 border border-blue-100">
-                        Cores pre-preenchidas automaticamente. Edite e salve para que as mudancas aparecam na loja publica.
-                      </p>
-                    )}
-
-                    {/* Current colors */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {colors.length === 0 ? (
-                        <span className="text-[11px] text-zinc-400 italic py-2">Sem cores definidas. Adicione cores abaixo.</span>
-                      ) : colors.map(c => (
-                        <div
-                          key={c.name}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
-                            c.in_stock ? 'bg-white border-zinc-200 text-zinc-700' : 'bg-red-50 border-red-200 text-red-400'
-                          }`}
-                        >
-                          <ColorDot name={c.name} hex={c.hex} size="md" />
-                          <span className={!c.in_stock ? 'line-through' : ''}>{c.name}</span>
-                          <button
-                            onClick={() => {
-                              setColors(prev => prev.map(cc => cc.name === c.name ? { ...cc, in_stock: !cc.in_stock } : cc));
-                              setColorChanged(true);
-                            }}
-                            className="p-0.5 rounded transition-colors"
-                            title={c.in_stock ? 'Marcar sem estoque' : 'Marcar em estoque'}
-                          >
-                            {c.in_stock ? <EyeOff size={12} className="text-zinc-400 hover:text-amber-600" /> : <Eye size={12} className="text-emerald-500 hover:text-emerald-700" />}
-                          </button>
-                          <button
-                            onClick={() => { setColors(prev => prev.filter(cc => cc.name !== c.name)); setColorChanged(true); }}
-                            className="p-0.5 text-zinc-300 hover:text-red-500 transition-colors"
-                            title="Remover"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add color buttons */}
-                    <div>
-                      <p className="text-[10px] font-semibold text-zinc-400 mb-2 uppercase tracking-wider">Adicionar Cores</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ALL_COLORS.filter(ac => !colors.find(c => c.name === ac.name)).map(ac => (
-                          <button
-                            key={ac.name}
-                            onClick={() => { setColors(prev => [...prev, { name: ac.name, hex: ac.hex, in_stock: true }]); setColorChanged(true); }}
-                            className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-dashed border-zinc-300 text-[10px] text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50/50 transition-all"
-                          >
-                            <Plus size={10} />
-                            <ColorDot name={ac.name} hex={ac.hex} />
-                            <span>{ac.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {colorChanged && (
-                      <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 text-[11px] text-purple-700 flex items-center gap-2">
-                        <Info size={12} />
-                        As cores serao salvas junto com o produto quando voce clicar "Salvar"
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+          {/* Status */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Status</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStatus('published')}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
+                  status === 'published' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-zinc-600 border-zinc-200'
+                }`}
+              >
+                Publicado
+              </button>
+              <button
+                onClick={() => setStatus('draft')}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
+                  status === 'draft' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-zinc-600 border-zinc-200'
+                }`}
+              >
+                Rascunho
+              </button>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Bottom save bar (mobile) */}
-      <div className="sm:hidden bg-white border-t border-zinc-200 px-4 py-3 shrink-0 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
-        <button
-          onClick={handleSubmit}
-          disabled={saving}
-          className="w-full bg-blue-600 text-white px-4 py-3.5 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
-        >
-          {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-          {saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar Alteracoes'}
-        </button>
+          {/* Price */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <DollarSign size={11} /> Preco (R$) *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              placeholder="45.90"
+            />
+          </div>
+
+          {/* Shipping Dimensions */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Ruler size={11} /> Dimensoes (cm) e Peso (kg) - SuperFrete
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-[10px] text-zinc-400">Altura</span>
+                <input
+                  type="number" step="0.1" min="0"
+                  value={shHeight}
+                  onChange={e => setShHeight(e.target.value)}
+                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="12"
+                />
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-400">Largura</span>
+                <input
+                  type="number" step="0.1" min="0"
+                  value={shWidth}
+                  onChange={e => setShWidth(e.target.value)}
+                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="12"
+                />
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-400">Comprimento</span>
+                <input
+                  type="number" step="0.1" min="0"
+                  value={shLength}
+                  onChange={e => setShLength(e.target.value)}
+                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="19"
+                />
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-400">Peso (kg)</span>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={shWeight}
+                  onChange={e => setShWeight(e.target.value)}
+                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  placeholder="0.5"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
+              <Info size={10} /> Essas dimensoes sao usadas pelo SuperFrete para calcular o frete
+            </p>
+          </div>
+
+          {/* Images */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Camera size={11} /> Imagens
+            </label>
+            {images.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {images.map((img, idx) => (
+                  <div key={idx} className="relative group">
+                    <img
+                      src={img.url}
+                      alt={`Img ${idx + 1}`}
+                      className="w-16 h-16 rounded-lg object-cover border border-zinc-200"
+                      referrerPolicy="no-referrer"
+                    />
+                    <button
+                      onClick={() => removeImage(idx)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={10} />
+                    </button>
+                    {idx === 0 && (
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] text-center rounded-b-lg">Principal</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                value={newImageUrl}
+                onChange={e => setNewImageUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addImage()}
+                className="flex-1 px-3 py-2 rounded-xl border border-zinc-200 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="https://... (URL da imagem)"
+              />
+              <button
+                onClick={addImage}
+                className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-1"
+              >
+                <ImagePlus size={14} /> Adicionar
+              </button>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Descricao (HTML)</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-y"
+              placeholder="Descricao do produto..."
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-white border-t border-zinc-100 px-5 py-4 flex items-center gap-3 shrink-0">
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="flex-1 bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+          >
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar Alteracoes'}
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors"
+          >
+            Cancelar
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1220,6 +909,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
   saving: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [editingColors, setEditingColors] = useState(false);
   const [colors, setColors] = useState<ColorItem[]>(product._availableColors);
   const [colorChanged, setColorChanged] = useState(false);
 
@@ -1231,6 +921,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
   const image = product.images?.[0]?.url || product.thumbnail || '';
   const isMulticolor = product._isLine && !product._needsColorSelection;
 
+  // Get group colors for suggestions
   const fakeP = { title: product.title, handle: product.handle, yards: product._yards } as any;
   const groupColors = getDefaultColorsForGroup(fakeP);
 
@@ -1283,7 +974,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
             <div className="flex items-center gap-1">
               <ColorSourceBadge source={product._colorSource} />
               <button
-                onClick={() => { setExpanded(!expanded); }}
+                onClick={() => { setExpanded(!expanded); setEditingColors(true); }}
                 className="flex items-center gap-0.5 text-[10px] text-purple-600 font-medium"
               >
                 <Palette size={10} />
@@ -1320,6 +1011,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Edit button */}
             <button
               onClick={() => onEdit(product)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-all"
@@ -1327,6 +1019,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
               <Pencil size={12} /> Editar Produto
             </button>
 
+            {/* Status toggle */}
             <button
               onClick={() => onStatusChange(product.id, product.status === 'published' ? 'draft' : 'published')}
               disabled={saving}
@@ -1350,7 +1043,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
 
               {product._colorSource === 'derived' && (
                 <p className="text-[10px] text-blue-600 bg-blue-50 rounded-lg px-2 py-1 border border-blue-100">
-                  Cores pre-preenchidas automaticamente. Edite e salve para refletir na loja publica.
+                  Cores pre-preenchidas automaticamente pela logica da loja. Edite e salve para personalizar.
                 </p>
               )}
 
@@ -1418,79 +1111,6 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
   );
 }
 
-// ============ ACTIVE FILTER CHIPS (mobile-first) ============
-function ActiveFilterChips({ 
-  groupFilter, statusFilter, searchQuery, 
-  onRemoveGroup, onRemoveStatus, onRemoveSearch, onClearAll 
-}: {
-  groupFilter: string;
-  statusFilter: string;
-  searchQuery: string;
-  onRemoveGroup: () => void;
-  onRemoveStatus: () => void;
-  onRemoveSearch: () => void;
-  onClearAll: () => void;
-}) {
-  const hasFilters = groupFilter !== 'all' || statusFilter !== 'all' || searchQuery.trim() !== '';
-  if (!hasFilters) return null;
-
-  const statusLabels: Record<string, string> = {
-    published: 'Publicados',
-    draft: 'Rascunhos',
-    no_colors: 'Sem Cores',
-    has_colors: 'Com Cores',
-    multicolor: 'Multicor',
-    derived_colors: 'Auto-derivadas',
-    saved_colors: 'Cores Salvas',
-  };
-
-  return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
-      <span className="text-[10px] text-zinc-400 font-medium shrink-0">Filtros:</span>
-      
-      {searchQuery.trim() && (
-        <button
-          onClick={onRemoveSearch}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-medium shrink-0 hover:bg-blue-100 transition-colors"
-        >
-          <Search size={10} />
-          "{searchQuery}"
-          <X size={10} className="text-blue-400 hover:text-blue-700" />
-        </button>
-      )}
-      
-      {groupFilter !== 'all' && (
-        <button
-          onClick={onRemoveGroup}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[11px] font-medium shrink-0 hover:bg-purple-100 transition-colors"
-        >
-          <Folder size={10} />
-          {groupFilter}
-          <X size={10} className="text-purple-400 hover:text-purple-700" />
-        </button>
-      )}
-      
-      {statusFilter !== 'all' && (
-        <button
-          onClick={onRemoveStatus}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-medium shrink-0 hover:bg-amber-100 transition-colors"
-        >
-          <Filter size={10} />
-          {statusLabels[statusFilter] || statusFilter}
-          <X size={10} className="text-amber-400 hover:text-amber-700" />
-        </button>
-      )}
-
-      <button
-        onClick={onClearAll}
-        className="text-[10px] text-zinc-400 hover:text-red-500 font-medium shrink-0 px-1.5 py-1 transition-colors"
-      >
-        Limpar tudo
-      </button>
-    </div>
-  );
-}
-
 // ============ MAIN COMPONENT ============
 export default function AdminProducts() {
   const [products, setProducts] = useState<ParsedProduct[]>([]);
@@ -1512,7 +1132,8 @@ export default function AdminProducts() {
   const [showBulkColors, setShowBulkColors] = useState(false);
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [quickBulkAction, setQuickBulkAction] = useState<'add' | 'remove' | null>(null);
-  const [editingProduct, setEditingProduct] = useState<ParsedProduct | null | undefined>(undefined);
+  const [showBulkActions, setShowBulkActions] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ParsedProduct | null | undefined>(undefined); // undefined=closed, null=new, product=editing
   const [editSaving, setEditSaving] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -1553,16 +1174,13 @@ export default function AdminProducts() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Save colors for single product — ENSURES metadata.available_colors is the source of truth
+  // Save colors for single product
   const handleSaveColors = useCallback(async (productId: string, colors: ColorItem[]) => {
     setSavingId(productId);
     try {
-      // Fetch current product to get existing metadata
       const productData = await adminFetch(`/admin/produtos-custom/${productId}`);
       const currentMetadata = productData.product?.metadata || {};
 
-      // Save colors to metadata.available_colors — this IS the source of truth
-      // The public store reads this via getColorsForProduct() in types.ts
       const result = await adminFetch(`/admin/produtos-custom/${productId}`, {
         method: 'POST',
         body: JSON.stringify({
@@ -1572,7 +1190,6 @@ export default function AdminProducts() {
 
       if (!result.success) throw new Error(result.errors?.join(', ') || 'Erro');
 
-      // Update local state to reflect the change immediately
       setProducts(prev => prev.map(p =>
         p.id === productId
           ? { 
@@ -1580,12 +1197,12 @@ export default function AdminProducts() {
               _availableColors: colors, 
               metadata: { ...p.metadata, available_colors: colors }, 
               _colorConfigKey: colors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE',
-              _colorSource: 'metadata' as const,
+              _colorSource: 'metadata' as const, // Now it's explicitly saved
             }
           : p
       ));
 
-      showToast('Cores salvas! Mudancas refletem na loja publica.', 'success');
+      showToast('Cores salvas!', 'success');
     } catch (err: any) {
       showToast(`Erro: ${err.message}`, 'error');
     } finally {
@@ -1693,8 +1310,10 @@ export default function AdminProducts() {
         const productData = await adminFetch(`/admin/produtos-custom/${pid}`);
         const currentMetadata = productData.product?.metadata || {};
         
+        // Start from actual saved metadata colors, or derive from store if empty
         let currentColors: ColorItem[] = currentMetadata.available_colors || [];
         if (currentColors.length === 0) {
+          // If no saved colors, start from what the store would show
           const product = products.find(p => p.id === pid);
           if (product && product._colorSource === 'derived') {
             currentColors = [...product._availableColors];
@@ -1744,18 +1363,7 @@ export default function AdminProducts() {
     setEditSaving(true);
     try {
       if (data.isNew) {
-        // CREATE NEW PRODUCT
-        const metadataPayload: Record<string, any> = {
-          shipping_height: data.shipping_height,
-          shipping_width: data.shipping_width,
-          shipping_length: data.shipping_length,
-          shipping_weight: data.shipping_weight,
-        };
-        if (data.grupo) metadataPayload.grupo = data.grupo;
-        if (data.colors && data.colors.length > 0) {
-          metadataPayload.available_colors = data.colors;
-        }
-
+        // CREATE NEW PRODUCT via Medusa admin API
         const result = await adminFetch('/admin/produtos-custom', {
           method: 'POST',
           body: JSON.stringify({
@@ -1765,7 +1373,12 @@ export default function AdminProducts() {
             status: data.status,
             price: data.price,
             images: data.images,
-            metadata: metadataPayload,
+            metadata: {
+              shipping_height: data.shipping_height,
+              shipping_width: data.shipping_width,
+              shipping_length: data.shipping_length,
+              shipping_weight: data.shipping_weight,
+            },
           }),
         });
 
@@ -1773,35 +1386,29 @@ export default function AdminProducts() {
         
         showToast('Produto criado com sucesso!', 'success');
         setEditingProduct(undefined);
-        loadProducts();
+        loadProducts(); // Reload to get the new product with all data
       } else {
         // UPDATE EXISTING PRODUCT
         const productId = editingProduct?.id;
         if (!productId) throw new Error('ID do produto nao encontrado');
 
+        // Get current metadata to preserve existing fields
         const productData = await adminFetch(`/admin/produtos-custom/${productId}`);
         const currentMetadata = productData.product?.metadata || {};
 
-        const metadataUpdate: Record<string, any> = {
-          ...currentMetadata,
-          shipping_height: data.shipping_height,
-          shipping_width: data.shipping_width,
-          shipping_length: data.shipping_length,
-          shipping_weight: data.shipping_weight,
-        };
-        if (data.grupo) metadataUpdate.grupo = data.grupo;
-        
-        // If colors were changed in the editor, save them too
-        if (data.colors !== undefined) {
-          metadataUpdate.available_colors = data.colors;
-        }
-
+        // Build update payload
         const updatePayload: any = {
           title: data.title,
           handle: data.handle,
           description: data.description,
           status: data.status,
-          metadata: metadataUpdate,
+          metadata: {
+            ...currentMetadata,
+            shipping_height: data.shipping_height,
+            shipping_width: data.shipping_width,
+            shipping_length: data.shipping_length,
+            shipping_weight: data.shipping_weight,
+          },
         };
 
         // Update price if changed
@@ -1815,7 +1422,7 @@ export default function AdminProducts() {
           }
         }
 
-        // Update images
+        // Update images if changed
         const currentUrls = (editingProduct?.images || []).map(i => i.url);
         const newUrls = data.images || [];
         const imagesChanged = JSON.stringify(currentUrls) !== JSON.stringify(newUrls);
@@ -1832,7 +1439,7 @@ export default function AdminProducts() {
 
         showToast('Produto atualizado!', 'success');
         setEditingProduct(undefined);
-        loadProducts();
+        loadProducts(); // Reload to get fresh data
       }
     } catch (err: any) {
       showToast(`Erro: ${err.message}`, 'error');
@@ -1935,24 +1542,24 @@ export default function AdminProducts() {
 
       {/* Color stats */}
       {(stats.derivedColors > 0 || stats.savedColors > 0) && (
-        <div className="flex gap-2 text-[10px] overflow-x-auto pb-0.5 -mx-1 px-1">
+        <div className="flex gap-2 text-[10px]">
           {stats.savedColors > 0 && (
-            <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200/60 font-medium shrink-0">
+            <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200/60 font-medium">
               {stats.savedColors} com cores salvas
             </span>
           )}
           {stats.derivedColors > 0 && (
-            <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200/60 font-medium shrink-0">
+            <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200/60 font-medium">
               {stats.derivedColors} com cores auto-derivadas
             </span>
           )}
           {stats.noColors > 0 && (
-            <span className="bg-zinc-50 text-zinc-500 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium shrink-0">
+            <span className="bg-zinc-50 text-zinc-500 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium">
               {stats.noColors} sem cores
             </span>
           )}
           {stats.multicolor > 0 && (
-            <span className="bg-gradient-to-r from-red-50 via-yellow-50 to-blue-50 text-zinc-600 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium shrink-0">
+            <span className="bg-gradient-to-r from-red-50 via-yellow-50 to-blue-50 text-zinc-600 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium">
               {stats.multicolor} multicor
             </span>
           )}
@@ -2061,20 +1668,18 @@ export default function AdminProducts() {
                 ))}
               </div>
             </div>
+
+            {(groupFilter !== 'all' || statusFilter !== 'all') && (
+              <button
+                onClick={() => { setGroupFilter('all'); setStatusFilter('all'); }}
+                className="text-[11px] text-blue-600 font-medium flex items-center gap-1 hover:underline"
+              >
+                <X size={12} /> Limpar filtros
+              </button>
+            )}
           </div>
         )}
       </div>
-
-      {/* ============ ACTIVE FILTER CHIPS (mobile-first) ============ */}
-      <ActiveFilterChips
-        groupFilter={groupFilter}
-        statusFilter={statusFilter}
-        searchQuery={searchQuery}
-        onRemoveGroup={() => setGroupFilter('all')}
-        onRemoveStatus={() => setStatusFilter('all')}
-        onRemoveSearch={() => setSearchQuery('')}
-        onClearAll={() => { setGroupFilter('all'); setStatusFilter('all'); setSearchQuery(''); }}
-      />
 
       {/* ============ SELECT ALL BAR ============ */}
       {!loading && filteredProducts.length > 0 && (
@@ -2106,9 +1711,9 @@ export default function AdminProducts() {
         <div className="bg-white p-12 rounded-2xl border border-zinc-100 text-center">
           <Package size={36} className="text-zinc-200 mx-auto mb-3" />
           <p className="text-zinc-500 text-sm font-medium">Nenhum produto encontrado</p>
-          {(searchQuery || groupFilter !== 'all' || statusFilter !== 'all') && (
-            <button onClick={() => { setSearchQuery(''); setGroupFilter('all'); setStatusFilter('all'); }} className="text-blue-600 text-xs mt-2 hover:underline">
-              Limpar filtros
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="text-blue-600 text-xs mt-2 hover:underline">
+              Limpar busca
             </button>
           )}
         </div>
@@ -2224,11 +1829,9 @@ export default function AdminProducts() {
         />
       )}
 
-      {/* Full-screen product editor */}
       {editingProduct !== undefined && (
-        <ProductEditor
+        <ProductEditModal
           product={editingProduct}
-          allGroups={groups}
           onSave={handleProductSave}
           onClose={() => setEditingProduct(undefined)}
           saving={editSaving}
