@@ -37,30 +37,7 @@ export async function adminFetch(path: string, options: RequestInit = {}) {
     throw new Error('Sessao expirada. Faca login novamente.');
   }
 
-  // Robust error handling for non-JSON responses
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Erro HTTP ${res.status}: ${text.slice(0, 200) || 'Resposta invalida do servidor'}`);
-    }
-    // Some endpoints might return empty 200/204
-    if (res.status === 204 || res.headers.get('content-length') === '0') {
-      return { success: true };
-    }
-  }
-
-  const data = await res.json().catch(() => null);
-  
-  if (!res.ok && data) {
-    throw new Error(data.message || data.error || `Erro HTTP ${res.status}`);
-  }
-  
-  if (!res.ok) {
-    throw new Error(`Erro HTTP ${res.status}`);
-  }
-
-  return data || { success: true };
+  return res.json();
 }
 
 export function isAuthenticated(): boolean {

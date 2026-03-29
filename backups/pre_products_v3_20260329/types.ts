@@ -97,41 +97,13 @@ export function getColorGroupName(product: Product): string {
 }
 
 /**
- * Get the default color list for a product based on its group (title-based).
- * Used as fallback when no admin-configured colors exist.
+ * Get the correct color list for a product based on its group.
+ * Returns the group-specific colors.
  */
-export function getDefaultColorsForGroup(product: Product): ColorLineItem[] {
+export function getColorsForProduct(product: Product): ColorLineItem[] {
   if (isNylonEsportiva(product)) return COLORS_NYLON_ESPORTIVA;
   if (isKingLine(product)) return COLORS_KING;
   return COLORS_OTHER_LINES;
-}
-
-/**
- * Get the correct color list for a product.
- * 
- * Priority:
- * 1. If metadata.available_colors exists (admin has configured colors),
- *    return ONLY the in-stock colors from that list.
- * 2. Otherwise, return the default group-based colors (title matching).
- * 
- * This ensures synchronization between admin and store:
- * - Admin saves available_colors with in_stock flags
- * - Store shows only in-stock colors to customers
- * - If admin hasn't configured anything, store shows all group defaults
- */
-export function getColorsForProduct(product: Product): ColorLineItem[] {
-  const adminColors = product.metadata?.available_colors;
-  if (Array.isArray(adminColors) && adminColors.length > 0) {
-    // Admin has configured colors — show only in-stock ones
-    return adminColors
-      .filter((c: any) => c.in_stock !== false) // Include if in_stock is true or undefined
-      .map((c: any) => ({
-        name: c.name,
-        hex: c.hex || LINE_COLORS.find(lc => lc.name === c.name)?.hex || '#9ca3af',
-      }));
-  }
-  // Fallback: group-based defaults
-  return getDefaultColorsForGroup(product);
 }
 
 /**

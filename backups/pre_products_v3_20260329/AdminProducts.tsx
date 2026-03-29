@@ -5,11 +5,10 @@ import {
   Eye, EyeOff, Filter, Package, Layers, AlertTriangle,
   ArrowUpDown, MinusSquare, Edit3, Globe, GlobeLock,
   Archive, RotateCcw, Trash2, MoreHorizontal, SlidersHorizontal,
-  ChevronUp, Copy, Tag, ImagePlus, DollarSign, Ruler, Weight,
-  PlusCircle, Camera, Pencil, Info
+  ChevronUp, Copy, Tag
 } from 'lucide-react';
 import { adminFetch } from './adminApi';
-import { LINE_COLORS, getColorsForProduct, getDefaultColorsForGroup, getColorGroupName, isNylonEsportiva, isKingLine, needsColorSelection, SKIP_COLOR_YARDS } from '../types';
+import { LINE_COLORS, getColorsForProduct, getColorGroupName, isNylonEsportiva, isKingLine, needsColorSelection } from '../types';
 
 // ============ TYPES ============
 interface ColorItem {
@@ -26,7 +25,7 @@ interface ProductData {
   status: string;
   metadata: Record<string, any>;
   thumbnail: string;
-  images: { id?: string; url: string }[];
+  images: { url: string }[];
   variants: any[];
 }
 
@@ -41,14 +40,7 @@ interface ParsedProduct extends ProductData {
   _availableColors: ColorItem[];
   _isLine: boolean;
   _needsColorSelection: boolean;
-  _colorConfigKey: string;
-  _colorSource: 'metadata' | 'derived' | 'none'; // tracks where colors came from
-  _variantId: string | null;
-  _priceId: string | null;
-  _shippingHeight: number | null;
-  _shippingWidth: number | null;
-  _shippingLength: number | null;
-  _shippingWeight: number | null;
+  _colorConfigKey: string; // key for grouping identical color configurations
 }
 
 // ============ ALL POSSIBLE COLORS ============
@@ -72,30 +64,7 @@ function getColorHex(name: string): string {
   return c?.hex || '#9ca3af';
 }
 
-// ============ SHIPPING DEFAULTS (same as api.ts) ============
-function getDefaultShipping(yards: number | null, title: string): { height: number; width: number; length: number; weight: number } {
-  if (title && /carretilha/i.test(title)) {
-    return { height: 25, width: 33, length: 31, weight: 1.0 };
-  }
-  switch (yards) {
-    case 50:   return { height: 12, width: 12, length: 12, weight: 0.2 };
-    case 100:  return { height: 12, width: 12, length: 12, weight: 0.2 };
-    case 200:  return { height: 12, width: 12, length: 12, weight: 0.2 };
-    case 500:  return { height: 12, width: 12, length: 19, weight: 0.4 };
-    case 600:  return { height: 12, width: 18, length: 18, weight: 0.3 };
-    case 1000: return { height: 15, width: 15, length: 18, weight: 0.5 };
-    case 2000: return { height: 18, width: 18, length: 19, weight: 1.0 };
-    case 3000: return { height: 18, width: 18, length: 27, weight: 1.0 };
-    case 6000: return { height: 19, width: 19, length: 25, weight: 2.0 };
-    case 12000: return { height: 21, width: 21, length: 30, weight: 3.0 };
-    default:   return { height: 12, width: 12, length: 12, weight: 0.2 };
-  }
-}
-
 // ============ PRODUCT PARSING ============
-// KEY FIX: When metadata.available_colors is empty for a line product that needs
-// color selection, we DERIVE the colors from getColorsForProduct() — the SAME 
-// logic the public store uses. This ensures the admin reflects reality.
 function parseProduct(p: ProductData): ParsedProduct {
   const title = p.title || '';
   const metadata = p.metadata || {};
@@ -142,45 +111,20 @@ function parseProduct(p: ProductData): ParsedProduct {
   // Stock
   const stock = variant?.inventory_quantity ?? null;
 
-  // Color group detection - using same logic as public store
+  // Color group detection
   const fakeProduct = { title, handle: p.handle, yards, metadata } as any;
   const colorGroup = getColorGroupName(fakeProduct);
-  
+  const availableColors: ColorItem[] = metadata.available_colors || [];
+
   // Check if needs color selection (same logic as store)
-  const needsColor = needsColorSelection(fakeProduct);
-
-  // ==== KEY FIX: COLOR PRE-FILLING ====
-  // The store determines available colors via getColorsForProduct() (title-based).
-  // If metadata.available_colors is populated, use that (admin has saved custom config).
-  // If it's empty BUT the product needs color selection, derive from store logic.
-  let availableColors: ColorItem[] = [];
-  let colorSource: 'metadata' | 'derived' | 'none' = 'none';
-
-  const metadataColors: ColorItem[] = metadata.available_colors || [];
-  
-  if (metadataColors.length > 0) {
-    // Admin has explicitly saved colors for this product
-    availableColors = metadataColors;
-    colorSource = 'metadata';
-  } else if (isLine && needsColor) {
-    // DERIVE from the same default group logic the public store uses
-    const storeColors = getDefaultColorsForGroup(fakeProduct);
-    availableColors = storeColors.map(c => ({
-      name: c.name,
-      hex: c.hex,
-      in_stock: true, // Default all to in-stock when deriving
-    }));
-    colorSource = 'derived';
-  }
+  const fakeForColorCheck = { title, handle: p.handle, yards, metadata } as any;
+  const needsColor = needsColorSelection(fakeForColorCheck);
 
   // Build a config key for intelligent grouping
   const colorConfigKey = availableColors
     .map(c => `${c.name}:${c.in_stock ? '1' : '0'}`)
     .sort()
     .join('|') || 'NONE';
-
-  // Shipping dimensions (from metadata or defaults)
-  const defaultShipping = getDefaultShipping(yards, title);
 
   return {
     ...p,
@@ -195,13 +139,6 @@ function parseProduct(p: ProductData): ParsedProduct {
     _isLine: isLine,
     _needsColorSelection: needsColor,
     _colorConfigKey: colorConfigKey,
-    _colorSource: colorSource,
-    _variantId: variant?.id || null,
-    _priceId: priceFromAdmin?.id || null,
-    _shippingHeight: metadata.shipping_height || defaultShipping.height,
-    _shippingWidth: metadata.shipping_width || defaultShipping.width,
-    _shippingLength: metadata.shipping_length || defaultShipping.length,
-    _shippingWeight: metadata.shipping_weight || defaultShipping.weight,
   };
 }
 
@@ -237,24 +174,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function ColorSourceBadge({ source }: { source: 'metadata' | 'derived' | 'none' }) {
-  if (source === 'metadata') {
-    return (
-      <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium border border-emerald-200/60" title="Cores salvas no admin">
-        Salvo
-      </span>
-    );
-  }
-  if (source === 'derived') {
-    return (
-      <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium border border-blue-200/60" title="Cores derivadas automaticamente da loja">
-        Auto
-      </span>
-    );
-  }
-  return null;
-}
-
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
   return (
     <div className={`fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-[100] rounded-2xl px-4 py-3 shadow-xl flex items-center gap-2 text-sm font-medium animate-slide-up-bar ${
@@ -267,299 +186,15 @@ function Toast({ message, type, onClose }: { message: string; type: 'success' | 
   );
 }
 
-// ============ PRODUCT EDIT MODAL ============
-function ProductEditModal({ product, onSave, onClose, saving }: {
-  product: ParsedProduct | null; // null = new product
-  onSave: (data: any) => void;
-  onClose: () => void;
-  saving: boolean;
-}) {
-  const isNew = !product;
-  const [title, setTitle] = useState(product?.title || '');
-  const [handle, setHandle] = useState(product?.handle || '');
-  const [description, setDescription] = useState(product?.description || '');
-  const [status, setStatus] = useState(product?.status || 'draft');
-  const [price, setPrice] = useState(product ? product._price.toFixed(2) : '');
-  const [shHeight, setShHeight] = useState(String(product?._shippingHeight || ''));
-  const [shWidth, setShWidth] = useState(String(product?._shippingWidth || ''));
-  const [shLength, setShLength] = useState(String(product?._shippingLength || ''));
-  const [shWeight, setShWeight] = useState(String(product?._shippingWeight || ''));
-  const [newImageUrl, setNewImageUrl] = useState('');
-  const [images, setImages] = useState<{ id?: string; url: string }[]>(product?.images || []);
-  const [errors, setErrors] = useState<string[]>([]);
-
-  const handleAutoHandle = (t: string) => {
-    if (isNew || !product?.handle) {
-      setHandle(t.toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-      );
-    }
-  };
-
-  const addImage = () => {
-    const url = newImageUrl.trim();
-    if (!url) return;
-    if (!url.startsWith('http')) {
-      setErrors(['URL da imagem deve comecar com http:// ou https://']);
-      return;
-    }
-    setImages(prev => [...prev, { url }]);
-    setNewImageUrl('');
-    setErrors([]);
-  };
-
-  const removeImage = (idx: number) => {
-    setImages(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const handleSubmit = () => {
-    const errs: string[] = [];
-    if (!title.trim()) errs.push('Titulo obrigatorio');
-    if (!price || Number(price) <= 0) errs.push('Preco invalido');
-    if (errs.length > 0) { setErrors(errs); return; }
-
-    onSave({
-      title: title.trim(),
-      handle: handle.trim() || undefined,
-      description: description.trim(),
-      status,
-      price: Number(price),
-      shipping_height: Number(shHeight) || null,
-      shipping_width: Number(shWidth) || null,
-      shipping_length: Number(shLength) || null,
-      shipping_weight: Number(shWeight) || null,
-      images: images.map(i => i.url),
-      isNew,
-    });
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div
-        className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-zinc-100 px-5 py-4 flex items-center justify-between shrink-0">
-          <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
-            {isNew ? <PlusCircle size={18} className="text-emerald-600" /> : <Pencil size={18} className="text-blue-600" />}
-            {isNew ? 'Novo Produto' : 'Editar Produto'}
-          </h3>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl">
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {errors.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700">
-              {errors.map((e, i) => <p key={i}>{e}</p>)}
-            </div>
-          )}
-
-          {/* Title */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Titulo *</label>
-            <input
-              value={title}
-              onChange={e => { setTitle(e.target.value); handleAutoHandle(e.target.value); }}
-              className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              placeholder="Ex: SHARK ATTACK 3000j Fio 4.4"
-            />
-          </div>
-
-          {/* Handle */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Handle (URL)</label>
-            <input
-              value={handle}
-              onChange={e => setHandle(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm font-mono text-zinc-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              placeholder="shark-attack-3000j"
-            />
-          </div>
-
-          {/* Status */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Status</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setStatus('published')}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                  status === 'published' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-zinc-600 border-zinc-200'
-                }`}
-              >
-                Publicado
-              </button>
-              <button
-                onClick={() => setStatus('draft')}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                  status === 'draft' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-zinc-600 border-zinc-200'
-                }`}
-              >
-                Rascunho
-              </button>
-            </div>
-          </div>
-
-          {/* Price */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-              <DollarSign size={11} /> Preco (R$) *
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={price}
-              onChange={e => setPrice(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              placeholder="45.90"
-            />
-          </div>
-
-          {/* Shipping Dimensions */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-              <Ruler size={11} /> Dimensoes (cm) e Peso (kg) - SuperFrete
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-[10px] text-zinc-400">Altura</span>
-                <input
-                  type="number" step="0.1" min="0"
-                  value={shHeight}
-                  onChange={e => setShHeight(e.target.value)}
-                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="12"
-                />
-              </div>
-              <div>
-                <span className="text-[10px] text-zinc-400">Largura</span>
-                <input
-                  type="number" step="0.1" min="0"
-                  value={shWidth}
-                  onChange={e => setShWidth(e.target.value)}
-                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="12"
-                />
-              </div>
-              <div>
-                <span className="text-[10px] text-zinc-400">Comprimento</span>
-                <input
-                  type="number" step="0.1" min="0"
-                  value={shLength}
-                  onChange={e => setShLength(e.target.value)}
-                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="19"
-                />
-              </div>
-              <div>
-                <span className="text-[10px] text-zinc-400">Peso (kg)</span>
-                <input
-                  type="number" step="0.01" min="0"
-                  value={shWeight}
-                  onChange={e => setShWeight(e.target.value)}
-                  className="w-full px-2 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="0.5"
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
-              <Info size={10} /> Essas dimensoes sao usadas pelo SuperFrete para calcular o frete
-            </p>
-          </div>
-
-          {/* Images */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-              <Camera size={11} /> Imagens
-            </label>
-            {images.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {images.map((img, idx) => (
-                  <div key={idx} className="relative group">
-                    <img
-                      src={img.url}
-                      alt={`Img ${idx + 1}`}
-                      className="w-16 h-16 rounded-lg object-cover border border-zinc-200"
-                      referrerPolicy="no-referrer"
-                    />
-                    <button
-                      onClick={() => removeImage(idx)}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X size={10} />
-                    </button>
-                    {idx === 0 && (
-                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[8px] text-center rounded-b-lg">Principal</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <input
-                value={newImageUrl}
-                onChange={e => setNewImageUrl(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addImage()}
-                className="flex-1 px-3 py-2 rounded-xl border border-zinc-200 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="https://... (URL da imagem)"
-              />
-              <button
-                onClick={addImage}
-                className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-1"
-              >
-                <ImagePlus size={14} /> Adicionar
-              </button>
-            </div>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">Descricao (HTML)</label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 rounded-xl border border-zinc-200 text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-y"
-              placeholder="Descricao do produto..."
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="sticky bottom-0 bg-white border-t border-zinc-100 px-5 py-4 flex items-center gap-3 shrink-0">
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex-1 bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
-          >
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-            {saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar Alteracoes'}
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors"
-          >
-            Cancelar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ============ INTELLIGENT BULK COLOR EDITOR ============
+// Groups products by identical color configs and shows grouped editing cards
 function BulkColorEditor({ products, onApply, onClose, saving }: {
   products: ParsedProduct[];
   onApply: (updates: { productId: string; colors: ColorItem[] }[]) => void;
   onClose: () => void;
   saving: boolean;
 }) {
+  // Group products by their color configuration key
   const groups = useMemo(() => {
     const map = new Map<string, { products: ParsedProduct[]; colors: ColorItem[] }>();
     for (const p of products) {
@@ -576,6 +211,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
     }));
   }, [products]);
 
+  // State: editable colors per group
   const [groupColors, setGroupColors] = useState<Map<string, ColorItem[]>>(() => {
     const m = new Map();
     groups.forEach(g => m.set(g.key, [...g.originalColors]));
@@ -617,6 +253,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
         className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-xl max-h-[85vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="sticky top-0 bg-white border-b border-zinc-100 px-5 py-4 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
@@ -632,6 +269,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
           </button>
         </div>
 
+        {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {groups.map((group, gi) => {
             const colors = groupColors.get(group.key) || [];
@@ -639,6 +277,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
 
             return (
               <div key={group.key} className={`rounded-xl border ${isChanged ? 'border-purple-300 bg-purple-50/30' : 'border-zinc-200 bg-zinc-50/50'} p-4 space-y-3`}>
+                {/* Group header */}
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
@@ -664,6 +303,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
                   )}
                 </div>
 
+                {/* Current colors as editable chips */}
                 <div>
                   <p className="text-[10px] font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">Cores Atuais</p>
                   <div className="flex flex-wrap gap-1.5">
@@ -701,6 +341,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
                   </div>
                 </div>
 
+                {/* Add colors */}
                 <div>
                   <p className="text-[10px] font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">Adicionar Cores</p>
                   <div className="flex flex-wrap gap-1">
@@ -722,6 +363,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
           })}
         </div>
 
+        {/* Footer */}
         <div className="sticky bottom-0 bg-white border-t border-zinc-100 px-5 py-4 flex items-center gap-3 shrink-0">
           <button
             onClick={handleApply}
@@ -770,6 +412,7 @@ function BulkStatusModal({ products, onApply, onClose, saving }: {
         </div>
 
         <div className="px-5 py-5 space-y-3">
+          {/* Publish all */}
           <button
             onClick={() => onApply(products.map(p => p.id), 'published')}
             disabled={saving}
@@ -787,6 +430,7 @@ function BulkStatusModal({ products, onApply, onClose, saving }: {
             {saving ? <Loader2 size={16} className="animate-spin text-zinc-400" /> : <ChevronRight size={16} className="text-zinc-300" />}
           </button>
 
+          {/* Unpublish all */}
           <button
             onClick={() => onApply(products.map(p => p.id), 'draft')}
             disabled={saving}
@@ -818,7 +462,7 @@ function BulkStatusModal({ products, onApply, onClose, saving }: {
   );
 }
 
-// ============ QUICK BULK COLOR ACTIONS ============
+// ============ QUICK BULK COLOR ACTIONS (add/remove specific colors) ============
 function QuickBulkColorModal({ products, action, onApply, onClose, saving }: {
   products: ParsedProduct[];
   action: 'add' | 'remove';
@@ -899,13 +543,12 @@ function QuickBulkColorModal({ products, action, onApply, onClose, saving }: {
 }
 
 // ============ PRODUCT CARD (mobile-first) ============
-function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStatusChange, onEdit, saving }: {
+function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStatusChange, saving }: {
   product: ParsedProduct;
   isSelected: boolean;
   onToggleSelect: () => void;
   onSaveColors: (productId: string, colors: ColorItem[]) => void;
   onStatusChange: (productId: string, status: string) => void;
-  onEdit: (product: ParsedProduct) => void;
   saving: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -923,7 +566,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
 
   // Get group colors for suggestions
   const fakeP = { title: product.title, handle: product.handle, yards: product._yards } as any;
-  const groupColors = getDefaultColorsForGroup(fakeP);
+  const groupColors = getColorsForProduct(fakeP);
 
   return (
     <div className={`border-b border-zinc-100 last:border-b-0 transition-colors ${
@@ -971,16 +614,13 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
         <div className="shrink-0 flex flex-col items-end gap-1">
           <StatusBadge status={product.status} />
           {product._isLine && product._needsColorSelection && (
-            <div className="flex items-center gap-1">
-              <ColorSourceBadge source={product._colorSource} />
-              <button
-                onClick={() => { setExpanded(!expanded); setEditingColors(true); }}
-                className="flex items-center gap-0.5 text-[10px] text-purple-600 font-medium"
-              >
-                <Palette size={10} />
-                {product._availableColors.filter(c => c.in_stock).length}/{product._availableColors.length}
-              </button>
-            </div>
+            <button
+              onClick={() => { setExpanded(!expanded); setEditingColors(true); }}
+              className="flex items-center gap-0.5 text-[10px] text-purple-600 font-medium"
+            >
+              <Palette size={10} />
+              {product._availableColors.filter(c => c.in_stock).length}/{product._availableColors.length}
+            </button>
           )}
         </div>
 
@@ -1002,24 +642,9 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
             {product._colorGroup && <span>Linha: <span className="text-zinc-700">{product._colorGroup}</span></span>}
           </div>
 
-          {/* Shipping info */}
-          <div className="flex flex-wrap gap-2 text-[11px] text-zinc-500">
-            <span className="flex items-center gap-0.5"><Ruler size={10} /> {product._shippingHeight}x{product._shippingWidth}x{product._shippingLength}cm</span>
-            <span className="flex items-center gap-0.5"><Weight size={10} /> {product._shippingWeight}kg</span>
-            <span>Imagens: {product.images?.length || 0}</span>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Edit button */}
-            <button
-              onClick={() => onEdit(product)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-all"
-            >
-              <Pencil size={12} /> Editar Produto
-            </button>
-
-            {/* Status toggle */}
+          {/* Status toggle */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium text-zinc-500">Status:</span>
             <button
               onClick={() => onStatusChange(product.id, product.status === 'published' ? 'draft' : 'published')}
               disabled={saving}
@@ -1038,14 +663,7 @@ function ProductCard({ product, isSelected, onToggleSelect, onSaveColors, onStat
             <div className="space-y-2">
               <p className="text-[11px] font-semibold text-zinc-500 flex items-center gap-1">
                 <Palette size={12} /> Cores Disponiveis na Loja
-                <ColorSourceBadge source={product._colorSource} />
               </p>
-
-              {product._colorSource === 'derived' && (
-                <p className="text-[10px] text-blue-600 bg-blue-50 rounded-lg px-2 py-1 border border-blue-100">
-                  Cores pre-preenchidas automaticamente pela logica da loja. Edite e salve para personalizar.
-                </p>
-              )}
 
               {/* Current colors */}
               <div className="flex flex-wrap gap-1.5">
@@ -1133,8 +751,6 @@ export default function AdminProducts() {
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [quickBulkAction, setQuickBulkAction] = useState<'add' | 'remove' | null>(null);
   const [showBulkActions, setShowBulkActions] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<ParsedProduct | null | undefined>(undefined); // undefined=closed, null=new, product=editing
-  const [editSaving, setEditSaving] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -1192,13 +808,7 @@ export default function AdminProducts() {
 
       setProducts(prev => prev.map(p =>
         p.id === productId
-          ? { 
-              ...p, 
-              _availableColors: colors, 
-              metadata: { ...p.metadata, available_colors: colors }, 
-              _colorConfigKey: colors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE',
-              _colorSource: 'metadata' as const, // Now it's explicitly saved
-            }
+          ? { ...p, _availableColors: colors, metadata: { ...p.metadata, available_colors: colors }, _colorConfigKey: colors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE' }
           : p
       ));
 
@@ -1284,7 +894,7 @@ export default function AdminProducts() {
           const configKey = colors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE';
           setProducts(prev => prev.map(p =>
             p.id === productId
-              ? { ...p, _availableColors: colors, metadata: { ...p.metadata, available_colors: colors }, _colorConfigKey: configKey, _colorSource: 'metadata' as const }
+              ? { ...p, _availableColors: colors, metadata: { ...p.metadata, available_colors: colors }, _colorConfigKey: configKey }
               : p
           ));
         } else fail++;
@@ -1309,16 +919,7 @@ export default function AdminProducts() {
       try {
         const productData = await adminFetch(`/admin/produtos-custom/${pid}`);
         const currentMetadata = productData.product?.metadata || {};
-        
-        // Start from actual saved metadata colors, or derive from store if empty
         let currentColors: ColorItem[] = currentMetadata.available_colors || [];
-        if (currentColors.length === 0) {
-          // If no saved colors, start from what the store would show
-          const product = products.find(p => p.id === pid);
-          if (product && product._colorSource === 'derived') {
-            currentColors = [...product._availableColors];
-          }
-        }
 
         if (action === 'add') {
           for (const name of colorNames) {
@@ -1342,7 +943,7 @@ export default function AdminProducts() {
           const configKey = currentColors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE';
           setProducts(prev => prev.map(p =>
             p.id === pid
-              ? { ...p, _availableColors: currentColors, metadata: { ...p.metadata, available_colors: currentColors }, _colorConfigKey: configKey, _colorSource: 'metadata' as const }
+              ? { ...p, _availableColors: currentColors, metadata: { ...p.metadata, available_colors: currentColors }, _colorConfigKey: configKey }
               : p
           ));
         } else fail++;
@@ -1356,97 +957,7 @@ export default function AdminProducts() {
       fail === 0 ? `Cores ${action === 'add' ? 'adicionadas' : 'removidas'} em ${ok} produto(s)!` : `${ok} OK, ${fail} erro(s)`,
       fail === 0 ? 'success' : 'error'
     );
-  }, [products]);
-
-  // ============ PRODUCT EDIT/CREATE HANDLER ============
-  const handleProductSave = useCallback(async (data: any) => {
-    setEditSaving(true);
-    try {
-      if (data.isNew) {
-        // CREATE NEW PRODUCT via Medusa admin API
-        const result = await adminFetch('/admin/produtos-custom', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: data.title,
-            handle: data.handle,
-            description: data.description,
-            status: data.status,
-            price: data.price,
-            images: data.images,
-            metadata: {
-              shipping_height: data.shipping_height,
-              shipping_width: data.shipping_width,
-              shipping_length: data.shipping_length,
-              shipping_weight: data.shipping_weight,
-            },
-          }),
-        });
-
-        if (!result.success && !result.product) throw new Error(result.errors?.join(', ') || 'Erro ao criar produto');
-        
-        showToast('Produto criado com sucesso!', 'success');
-        setEditingProduct(undefined);
-        loadProducts(); // Reload to get the new product with all data
-      } else {
-        // UPDATE EXISTING PRODUCT
-        const productId = editingProduct?.id;
-        if (!productId) throw new Error('ID do produto nao encontrado');
-
-        // Get current metadata to preserve existing fields
-        const productData = await adminFetch(`/admin/produtos-custom/${productId}`);
-        const currentMetadata = productData.product?.metadata || {};
-
-        // Build update payload
-        const updatePayload: any = {
-          title: data.title,
-          handle: data.handle,
-          description: data.description,
-          status: data.status,
-          metadata: {
-            ...currentMetadata,
-            shipping_height: data.shipping_height,
-            shipping_width: data.shipping_width,
-            shipping_length: data.shipping_length,
-            shipping_weight: data.shipping_weight,
-          },
-        };
-
-        // Update price if changed
-        if (data.price && editingProduct && data.price !== editingProduct._price) {
-          updatePayload.price = data.price;
-          if (editingProduct._variantId) {
-            updatePayload.variant_id = editingProduct._variantId;
-          }
-          if (editingProduct._priceId) {
-            updatePayload.price_id = editingProduct._priceId;
-          }
-        }
-
-        // Update images if changed
-        const currentUrls = (editingProduct?.images || []).map(i => i.url);
-        const newUrls = data.images || [];
-        const imagesChanged = JSON.stringify(currentUrls) !== JSON.stringify(newUrls);
-        if (imagesChanged) {
-          updatePayload.images = newUrls;
-        }
-
-        const result = await adminFetch(`/admin/produtos-custom/${productId}`, {
-          method: 'POST',
-          body: JSON.stringify(updatePayload),
-        });
-
-        if (!result.success) throw new Error(result.errors?.join(', ') || 'Erro ao salvar');
-
-        showToast('Produto atualizado!', 'success');
-        setEditingProduct(undefined);
-        loadProducts(); // Reload to get fresh data
-      }
-    } catch (err: any) {
-      showToast(`Erro: ${err.message}`, 'error');
-    } finally {
-      setEditSaving(false);
-    }
-  }, [editingProduct]);
+  }, []);
 
   // Selection helpers
   const toggleSelect = (id: string) => {
@@ -1492,10 +1003,6 @@ export default function AdminProducts() {
       result = result.filter(p => p._availableColors.length > 0);
     } else if (statusFilter === 'multicolor') {
       result = result.filter(p => p._isLine && !p._needsColorSelection);
-    } else if (statusFilter === 'derived_colors') {
-      result = result.filter(p => p._colorSource === 'derived');
-    } else if (statusFilter === 'saved_colors') {
-      result = result.filter(p => p._colorSource === 'metadata');
     }
 
     return result;
@@ -1515,8 +1022,6 @@ export default function AdminProducts() {
     lines: products.filter(p => p._isLine).length,
     noColors: products.filter(p => p._isLine && p._needsColorSelection && p._availableColors.length === 0).length,
     multicolor: products.filter(p => p._isLine && !p._needsColorSelection).length,
-    derivedColors: products.filter(p => p._colorSource === 'derived').length,
-    savedColors: products.filter(p => p._colorSource === 'metadata').length,
   }), [products]);
 
   const selectedProducts = filteredProducts.filter(p => selectedIds.has(p.id));
@@ -1539,32 +1044,6 @@ export default function AdminProducts() {
           <p className="text-xl font-bold text-amber-700">{stats.draft}</p>
         </div>
       </div>
-
-      {/* Color stats */}
-      {(stats.derivedColors > 0 || stats.savedColors > 0) && (
-        <div className="flex gap-2 text-[10px]">
-          {stats.savedColors > 0 && (
-            <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200/60 font-medium">
-              {stats.savedColors} com cores salvas
-            </span>
-          )}
-          {stats.derivedColors > 0 && (
-            <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200/60 font-medium">
-              {stats.derivedColors} com cores auto-derivadas
-            </span>
-          )}
-          {stats.noColors > 0 && (
-            <span className="bg-zinc-50 text-zinc-500 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium">
-              {stats.noColors} sem cores
-            </span>
-          )}
-          {stats.multicolor > 0 && (
-            <span className="bg-gradient-to-r from-red-50 via-yellow-50 to-blue-50 text-zinc-600 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium">
-              {stats.multicolor} multicor
-            </span>
-          )}
-        </div>
-      )}
 
       {/* ============ SEARCH BAR ============ */}
       <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm">
@@ -1598,14 +1077,6 @@ export default function AdminProducts() {
             )}
           </button>
           <button
-            onClick={() => setEditingProduct(null)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-            title="Novo Produto"
-          >
-            <PlusCircle size={14} />
-            <span className="hidden sm:inline">Novo</span>
-          </button>
-          <button
             onClick={loadProducts}
             className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors"
             title="Atualizar"
@@ -1617,6 +1088,7 @@ export default function AdminProducts() {
         {/* Filters panel */}
         {showFilters && (
           <div className="border-t border-zinc-100 px-3 py-3 space-y-2.5 bg-zinc-50/50">
+            {/* Group filter */}
             <div>
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Grupo/Marca</p>
               <div className="flex flex-wrap gap-1.5">
@@ -1642,6 +1114,7 @@ export default function AdminProducts() {
               </div>
             </div>
 
+            {/* Status filter */}
             <div>
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Status/Tipo</p>
               <div className="flex flex-wrap gap-1.5">
@@ -1652,8 +1125,6 @@ export default function AdminProducts() {
                   { key: 'no_colors', label: 'Sem Cores', count: stats.noColors },
                   { key: 'has_colors', label: 'Com Cores' },
                   { key: 'multicolor', label: 'Multicor', count: stats.multicolor },
-                  { key: 'derived_colors', label: 'Auto-derivadas', count: stats.derivedColors },
-                  { key: 'saved_colors', label: 'Cores Salvas', count: stats.savedColors },
                 ].map(f => (
                   <button
                     key={f.key}
@@ -1669,6 +1140,7 @@ export default function AdminProducts() {
               </div>
             </div>
 
+            {/* Clear filters */}
             {(groupFilter !== 'all' || statusFilter !== 'all') && (
               <button
                 onClick={() => { setGroupFilter('all'); setStatusFilter('all'); }}
@@ -1727,7 +1199,6 @@ export default function AdminProducts() {
               onToggleSelect={() => toggleSelect(p.id)}
               onSaveColors={handleSaveColors}
               onStatusChange={handleStatusChange}
-              onEdit={(product) => setEditingProduct(product)}
               saving={savingId === p.id}
             />
           ))}
@@ -1738,6 +1209,7 @@ export default function AdminProducts() {
       {hasSelection && (
         <div className="fixed bottom-0 inset-x-0 z-50 animate-slide-up-bar" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
           <div className="bg-zinc-900 mx-3 rounded-2xl shadow-2xl px-4 py-3">
+            {/* Top line: count + close */}
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2">
                 <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
@@ -1763,7 +1235,9 @@ export default function AdminProducts() {
               </div>
             </div>
 
+            {/* Action buttons */}
             <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1">
+              {/* Status */}
               <button
                 onClick={() => setShowBulkStatus(true)}
                 className="flex items-center gap-1.5 px-3.5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shrink-0"
@@ -1772,6 +1246,7 @@ export default function AdminProducts() {
                 Status
               </button>
 
+              {/* Intelligent Color Editor */}
               <button
                 onClick={() => setShowBulkColors(true)}
                 className="flex items-center gap-1.5 px-3.5 py-2.5 bg-purple-600 text-white rounded-xl text-xs font-bold hover:bg-purple-700 transition-colors shrink-0"
@@ -1780,6 +1255,7 @@ export default function AdminProducts() {
                 Editar Cores
               </button>
 
+              {/* Quick add colors */}
               <button
                 onClick={() => setQuickBulkAction('add')}
                 className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shrink-0"
@@ -1788,6 +1264,7 @@ export default function AdminProducts() {
                 Add Cor
               </button>
 
+              {/* Quick remove colors */}
               <button
                 onClick={() => setQuickBulkAction('remove')}
                 className="flex items-center gap-1.5 px-3.5 py-2.5 bg-red-600/90 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition-colors shrink-0"
@@ -1826,15 +1303,6 @@ export default function AdminProducts() {
           onApply={handleQuickBulkColorApply}
           onClose={() => setQuickBulkAction(null)}
           saving={bulkSaving}
-        />
-      )}
-
-      {editingProduct !== undefined && (
-        <ProductEditModal
-          product={editingProduct}
-          onSave={handleProductSave}
-          onClose={() => setEditingProduct(undefined)}
-          saving={editSaving}
         />
       )}
 
