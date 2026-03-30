@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { RefreshCw, Package, Clock, CreditCard, BoxIcon, Truck, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, ChevronUp, MessageCircle, MoreVertical, FileText, Trash2, Download, X, Share2, Tag, Wallet, Printer, Search, Filter, Zap, Square, CheckSquare, AlertTriangle, FileDown, RotateCcw } from 'lucide-react';
-import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel } from './adminApi';
+import { RefreshCw, Package, Clock, CreditCard, BoxIcon, Truck, CheckCircle2, XCircle, Loader2, ChevronRight, MessageCircle, MoreVertical, FileText, Trash2, Download, X, Share2, Tag, Wallet, Printer, Search, Filter, Zap, Square, CheckSquare, AlertTriangle, FileDown } from 'lucide-react';
+import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete } from './adminApi';
 import { LINE_COLORS } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -106,24 +106,10 @@ export default function AdminOrders() {
 
   // Bulk operations state
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
-  const [bulkAction, setBulkAction] = useState<'mark_paid' | 'mark_paid_label' | 'pay_labels' | 'revert_to_paid' | null>(null);
+  const [bulkAction, setBulkAction] = useState<'mark_paid' | 'mark_paid_label' | 'pay_labels' | null>(null);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; results: any[] } | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
-
-  // Progress bar state for bulk operations
-  const [progressData, setProgressData] = useState<{
-    active: boolean;
-    expanded: boolean;
-    operation: string;
-    current: number;
-    total: number;
-    succeeded: number;
-    failed: number;
-    items: { id: string; label: string; status: 'pending' | 'generating' | 'paying' | 'completed' | 'error'; error?: string }[];
-  }>({
-    active: false, expanded: false, operation: '', current: 0, total: 0, succeeded: 0, failed: 0, items: [],
-  });
 
   // Ideal balance calculation
   const [idealBalance, setIdealBalance] = useState<number | null>(null);
@@ -311,7 +297,7 @@ export default function AdminOrders() {
     }
   };
 
-  // Execute bulk action — sequential processing with progress tracking
+  // Execute bulk action — enhanced for 'pay_labels' to handle generate+pay flow
   const executeBulkAction = async () => {
     if (!bulkAction || selectedOrders.size === 0) return;
 
@@ -334,98 +320,42 @@ export default function AdminOrders() {
     setBulkResult(null);
     setShowBulkConfirm(false);
 
-    const orderIds: string[] = Array.from(selectedOrders);
-
     try {
+      const orderIds: string[] = Array.from(selectedOrders);
+
       if (bulkAction === 'pay_labels') {
-        // Sequential processing with progress bar via backend batch endpoint
-        // Build progress items from selected orders
-        const progressItems = orderIds.map(oid => {
-          const o = filteredOrders.find(o => String(o.medusa_order_id || o.id) === oid);
-          return {
-            id: oid,
-            label: o ? `#${o.id} - ${o.customer_name || 'Cliente'}` : `#${oid}`,
-            status: 'pending' as const,
-          };
-        });
+        // Enhanced: For "Pagar Etiquetas" in paid tab, process each order sequentially
+        // If an order doesn't have a label yet, generate it first then pay
+        // This avoids the old bug where only orders WITH labels could be bulk-paid
+        const results: any[] = [];
+        let succeeded = 0;
+        let failed = 0;
+        const processedIds = new Set<string>(); // Prevent duplicate processing
 
-        setProgressData({
-          active: true, expanded: false, operation: 'Gerando e pagando etiquetas',
-          current: 0, total: orderIds.length, succeeded: 0, failed: 0, items: progressItems,
-        });
+        for (const orderId of orderIds) {
+          // Skip if already processed (duplicate guard)
+          if (processedIds.has(orderId)) continue;
+          processedIds.add(orderId);
 
-        // Mark all as generating
-        setProgressData(prev => ({
-          ...prev,
-          items: prev.items.map(item => ({ ...item, status: 'generating' as const })),
-        }));
+          try {
+            const result = await adminFetch('/admin/pedidos', {
+              method: 'PUT',
+              body: JSON.stringify({ action: 'finalize_and_label', orderId: orderId, medusa_order_id: orderId }),
+            });
+            if (result.success) {
+              succeeded++;
+              results.push({ id: orderId, success: true, tracking: result.order?.tracking_code });
+            } else {
+              failed++;
+              results.push({ id: orderId, success: false, error: result.error || 'Erro desconhecido', step: result.step });
+            }
+          } catch (err: any) {
+            failed++;
+            results.push({ id: orderId, success: false, error: err.message || 'Erro de conexao' });
+          }
+        }
 
-        // Call the backend batch endpoint (sequential processing with 2s delay is handled server-side)
-        const result = await batchFinalizeAndLabel(orderIds);
-
-        // Update progress with results
-        const finalItems = progressItems.map(item => {
-          const r = (result.results || []).find((r: any) =>
-            String(r.medusa_id) === item.id || String(r.id) === item.id
-          );
-          if (r?.success) return { ...item, status: 'completed' as const };
-          if (r) return { ...item, status: 'error' as const, error: r.error || 'Erro desconhecido' };
-          return { ...item, status: 'error' as const, error: 'Sem resposta' };
-        });
-
-        setProgressData(prev => ({
-          ...prev,
-          current: orderIds.length,
-          succeeded: result.succeeded || 0,
-          failed: result.failed || 0,
-          items: finalItems,
-        }));
-
-        setBulkResult({
-          succeeded: result.succeeded || 0,
-          failed: result.failed || 0,
-          results: result.results || [],
-        });
-      } else if (bulkAction === 'revert_to_paid') {
-        // Revert cancelled orders to paid
-        const progressItems = orderIds.map(oid => {
-          const o = filteredOrders.find(o => String(o.medusa_order_id || o.id) === oid);
-          return {
-            id: oid,
-            label: o ? `#${o.id} - ${o.customer_name || 'Cliente'}` : `#${oid}`,
-            status: 'pending' as const,
-          };
-        });
-
-        setProgressData({
-          active: true, expanded: false, operation: 'Revertendo para pago',
-          current: 0, total: orderIds.length, succeeded: 0, failed: 0, items: progressItems,
-        });
-
-        const result = await batchRevertToPaid(orderIds);
-
-        const finalItems = progressItems.map(item => {
-          const r = (result.results || []).find((r: any) =>
-            String(r.medusa_id) === item.id || String(r.id) === item.id
-          );
-          if (r?.success) return { ...item, status: 'completed' as const };
-          if (r) return { ...item, status: 'error' as const, error: r.error || 'Erro' };
-          return { ...item, status: 'error' as const, error: 'Sem resposta' };
-        });
-
-        setProgressData(prev => ({
-          ...prev,
-          current: orderIds.length,
-          succeeded: result.succeeded || 0,
-          failed: result.failed || 0,
-          items: finalItems,
-        }));
-
-        setBulkResult({
-          succeeded: result.succeeded || 0,
-          failed: result.failed || 0,
-          results: result.results || [],
-        });
+        setBulkResult({ succeeded, failed, results });
       } else {
         // Standard batch actions (mark_paid, mark_paid_label)
         let actionName = '';
@@ -1132,14 +1062,6 @@ export default function AdminOrders() {
                     <Wallet size={11} /> Gerar e Pagar Etiquetas
                   </button>
                 )}
-                {filter === 'cancelled' && (
-                  <button
-                    onClick={() => { setBulkAction('revert_to_paid'); setShowBulkConfirm(true); }}
-                    className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-emerald-700 flex items-center gap-1.5"
-                  >
-                    <CreditCard size={11} /> Reverter para Pago
-                  </button>
-                )}
                 <button
                   onClick={() => { setSelectedOrders(new Set()); setBulkResult(null); }}
                   className="text-zinc-400 hover:text-white text-xs px-2 py-1.5"
@@ -1189,10 +1111,7 @@ export default function AdminOrders() {
                   <>Voce vai marcar <strong>{selectedOrders.size} pedido{selectedOrders.size > 1 ? 's' : ''}</strong> como <span className="text-emerald-600 font-semibold">pago</span> e <span className="text-orange-600 font-semibold">gerar etiqueta</span> para cada um.</>
                 )}
                 {bulkAction === 'pay_labels' && (
-                  <>Voce vai <span className="text-orange-600 font-semibold">gerar e pagar as etiquetas</span> de <strong>{selectedOrders.size} pedido{selectedOrders.size > 1 ? 's' : ''}</strong> usando o saldo SuperFrete. Os pedidos serao processados <strong>um por vez</strong>, com intervalo de 2 segundos entre cada. Pedidos que ja possuem etiqueta serao apenas pagos. Pedidos SEM etiqueta terao a etiqueta gerada automaticamente.</>
-                )}
-                {bulkAction === 'revert_to_paid' && (
-                  <>Voce vai reverter <strong>{selectedOrders.size} pedido{selectedOrders.size > 1 ? 's' : ''}</strong> cancelado{selectedOrders.size > 1 ? 's' : ''} para <span className="text-emerald-600 font-semibold">pago</span>. Os dados da etiqueta SuperFrete serao limpos, permitindo gerar nova etiqueta. <strong>Nenhuma chamada a API da SuperFrete sera feita.</strong></>
+                  <>Voce vai <span className="text-orange-600 font-semibold">gerar e pagar as etiquetas</span> de <strong>{selectedOrders.size} pedido{selectedOrders.size > 1 ? 's' : ''}</strong> usando o saldo SuperFrete. Pedidos que ja possuem etiqueta serao apenas pagos. Pedidos SEM etiqueta terao a etiqueta gerada automaticamente.</>
                 )}
               </p>
               <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-left text-xs text-red-700">
@@ -1224,17 +1143,6 @@ export default function AdminOrders() {
                   </div>
                 );
               })()}
-              {bulkAction === 'revert_to_paid' && (
-                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-left text-xs text-emerald-700">
-                  <p className="font-bold flex items-center gap-1"><RotateCcw size={12} /> O que sera feito:</p>
-                  <ul className="mt-1 space-y-0.5 list-disc list-inside">
-                    <li>Status sera alterado de <strong>cancelado</strong> para <strong>pago</strong></li>
-                    <li>Dados da etiqueta SuperFrete serao limpos</li>
-                    <li>Nova etiqueta podera ser gerada</li>
-                    <li>Nenhuma chamada a API da SuperFrete</li>
-                  </ul>
-                </div>
-              )}
             </div>
             <div className="flex flex-col gap-2">
               <button
@@ -1267,7 +1175,7 @@ export default function AdminOrders() {
             )}
           </p>
           <div className="flex items-center gap-2">
-            {(filter === 'awaiting_payment' || filter === 'paid' || filter === 'cancelled') && filteredOrders.length > 0 && (
+            {(filter === 'awaiting_payment' || filter === 'paid') && filteredOrders.length > 0 && (
               <button
                 onClick={toggleAllOrders}
                 className="text-xs text-zinc-400 hover:text-zinc-600 flex items-center gap-1"
@@ -1304,7 +1212,7 @@ export default function AdminOrders() {
             <OrderListItem
               key={order.id}
               order={order}
-              showCheckbox={filter === 'awaiting_payment' || filter === 'paid' || filter === 'cancelled'}
+              showCheckbox={filter === 'awaiting_payment' || filter === 'paid'}
               isSelected={selectedOrders.has(String(order.medusa_order_id || order.id))}
               onToggleSelect={() => toggleOrderSelection(String(order.medusa_order_id || order.id))}
               onClick={() => {
@@ -1314,115 +1222,6 @@ export default function AdminOrders() {
               }}
             />
           ))}
-        </div>
-      )}
-
-      {/* ============ FLOATING PROGRESS BAR ============ */}
-      {progressData.active && (
-        <div
-          className="fixed z-50 transition-all duration-300 ease-in-out"
-          style={{
-            bottom: '12px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: progressData.expanded ? '85%' : '70%',
-            maxWidth: progressData.expanded ? '600px' : '420px',
-            maxHeight: progressData.expanded ? '50vh' : 'auto',
-          }}
-        >
-          <div className="bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-700 overflow-hidden">
-            {/* Compact bar (always visible) */}
-            <div
-              className="px-4 py-3 cursor-pointer"
-              onClick={() => setProgressData(prev => ({ ...prev, expanded: !prev.expanded }))}
-            >
-              <div className="flex items-center gap-3">
-                {/* Icon: spinning during process, check/alert after */}
-                {progressData.current < progressData.total ? (
-                  <Loader2 size={16} className="text-orange-400 animate-spin shrink-0" />
-                ) : progressData.failed > 0 ? (
-                  <AlertTriangle size={16} className="text-amber-400 shrink-0" />
-                ) : (
-                  <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-white text-xs font-bold truncate">{progressData.operation}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-zinc-400 text-[10px]">
-                      {progressData.current < progressData.total
-                        ? `${progressData.current} de ${progressData.total}`
-                        : 'Concluido'}
-                    </span>
-                    {progressData.succeeded > 0 && (
-                      <span className="text-emerald-400 text-[10px]">{progressData.succeeded} OK</span>
-                    )}
-                    {progressData.failed > 0 && (
-                      <span className="text-red-400 text-[10px]">{progressData.failed} erro{progressData.failed > 1 ? 's' : ''}</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Expand/collapse toggle */}
-                <button className="text-zinc-400 hover:text-white p-1 shrink-0">
-                  {progressData.expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                </button>
-
-                {/* Close button (only after complete) */}
-                {progressData.current >= progressData.total && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setProgressData(prev => ({ ...prev, active: false })); }}
-                    className="text-zinc-500 hover:text-white p-1 shrink-0"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-
-              {/* Progress bar */}
-              <div className="mt-2 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    progressData.failed > 0 ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}
-                  style={{ width: progressData.total > 0 ? `${(progressData.current / progressData.total) * 100}%` : '0%' }}
-                />
-              </div>
-            </div>
-
-            {/* Expanded detail list */}
-            {progressData.expanded && (
-              <div className="border-t border-zinc-800 max-h-[40vh] overflow-y-auto">
-                {progressData.items.map((item, idx) => (
-                  <div
-                    key={item.id}
-                    className={`flex items-center gap-2.5 px-4 py-2 text-xs border-b border-zinc-800/50 last:border-0 ${
-                      item.status === 'error' ? 'bg-red-900/20' : item.status === 'completed' ? 'bg-emerald-900/10' : ''
-                    }`}
-                  >
-                    {/* Status icon */}
-                    {item.status === 'pending' && <Clock size={12} className="text-zinc-500 shrink-0" />}
-                    {item.status === 'generating' && <Loader2 size={12} className="text-orange-400 animate-spin shrink-0" />}
-                    {item.status === 'paying' && <Wallet size={12} className="text-blue-400 animate-pulse shrink-0" />}
-                    {item.status === 'completed' && <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />}
-                    {item.status === 'error' && <XCircle size={12} className="text-red-400 shrink-0" />}
-
-                    <span className="text-zinc-300 flex-1 min-w-0 truncate">{item.label}</span>
-
-                    {item.status === 'completed' && <span className="text-emerald-400 text-[10px] shrink-0">OK</span>}
-                    {item.status === 'error' && (
-                      <span className="text-red-400 text-[10px] shrink-0 max-w-[40%] truncate" title={item.error}>
-                        {item.error}
-                      </span>
-                    )}
-                    {(item.status === 'generating' || item.status === 'paying') && (
-                      <span className="text-orange-400 text-[10px] shrink-0">Processando...</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
 

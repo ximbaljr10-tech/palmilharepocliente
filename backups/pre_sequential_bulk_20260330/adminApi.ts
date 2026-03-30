@@ -212,48 +212,6 @@ export async function batchSyncSuperfrete(): Promise<{
   }
 }
 
-// ============ BATCH REVERT TO PAID ============
-export async function batchRevertToPaid(orderIds: string[]): Promise<{
-  success: boolean;
-  total: number;
-  succeeded: number;
-  failed: number;
-  results: any[];
-  error?: string;
-}> {
-  try {
-    const result = await adminFetch('/admin/pedidos', {
-      method: 'PUT',
-      body: JSON.stringify({ orderId: 0, action: 'batch_revert_to_paid', order_ids: orderIds }),
-    });
-    return result;
-  } catch (err: any) {
-    console.error('Erro ao reverter pedidos:', err);
-    return { success: false, total: 0, succeeded: 0, failed: 0, results: [], error: err.message };
-  }
-}
-
-// ============ BATCH FINALIZE AND LABEL (sequential) ============
-export async function batchFinalizeAndLabel(orderIds: string[]): Promise<{
-  success: boolean;
-  total: number;
-  succeeded: number;
-  failed: number;
-  results: any[];
-  error?: string;
-}> {
-  try {
-    const result = await adminFetch('/admin/pedidos', {
-      method: 'PUT',
-      body: JSON.stringify({ orderId: 0, action: 'batch_finalize_and_label', order_ids: orderIds }),
-    });
-    return result;
-  } catch (err: any) {
-    console.error('Erro ao finalizar pedidos:', err);
-    return { success: false, total: 0, succeeded: 0, failed: 0, results: [], error: err.message };
-  }
-}
-
 // Check if order is archived (from order metadata or a dedicated field)
 export function isOrderArchived(order: any): boolean {
   // Check metadata.archived flag
