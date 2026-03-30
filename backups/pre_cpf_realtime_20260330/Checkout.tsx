@@ -5,32 +5,6 @@ import { api } from '../api';
 import { LINE_COLORS } from '../types';
 import { CheckCircle2, Copy, MessageCircle, Package, AlertTriangle, Loader2, Mail, MailOpen, ChevronDown, ChevronUp } from 'lucide-react';
 
-// ============ CPF VALIDATION (real digit verification) ============
-function validateCPF(cpf: string): boolean {
-  const cleaned = cpf.replace(/\D/g, '');
-  if (cleaned.length !== 11) return false;
-  if (/^(\d)\1{10}$/.test(cleaned)) return false;
-  let sum = 0;
-  for (let i = 0; i < 9; i++) sum += parseInt(cleaned.charAt(i)) * (10 - i);
-  let remainder = (sum * 10) % 11;
-  if (remainder === 10) remainder = 0;
-  if (remainder !== parseInt(cleaned.charAt(9))) return false;
-  sum = 0;
-  for (let i = 0; i < 10; i++) sum += parseInt(cleaned.charAt(i)) * (11 - i);
-  remainder = (sum * 10) % 11;
-  if (remainder === 10) remainder = 0;
-  if (remainder !== parseInt(cleaned.charAt(10))) return false;
-  return true;
-}
-
-function formatCPFInput(value: string): string {
-  const cleaned = value.replace(/\D/g, '').slice(0, 11);
-  if (cleaned.length <= 3) return cleaned;
-  if (cleaned.length <= 6) return `${cleaned.slice(0, 3)}.${cleaned.slice(3)}`;
-  if (cleaned.length <= 9) return `${cleaned.slice(0, 3)}.${cleaned.slice(3, 6)}.${cleaned.slice(6)}`;
-  return `${cleaned.slice(0, 3)}.${cleaned.slice(3, 6)}.${cleaned.slice(6, 9)}-${cleaned.slice(9)}`;
-}
-
 export default function Checkout() {
   const { cart, total, clearCart, selectedShipping, setSelectedShipping, setShippingOptions, shippingOptions, cartCep } = useCart();
   const navigate = useNavigate();
@@ -38,7 +12,7 @@ export default function Checkout() {
   const [loadingCep, setLoadingCep] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    name: '', email: '', whatsapp: '', cpf: '', cep: '',
+    name: '', email: '', whatsapp: '', cep: '',
     street: '', number: '', complement: '', neighborhood: '', city: '', state: '',
   });
   const [semNumero, setSemNumero] = useState(false);
@@ -46,7 +20,6 @@ export default function Checkout() {
   const [finalTotal, setFinalTotal] = useState<number>(0);
   // Validation errors
   const [nameError, setNameError] = useState('');
-  const [cpfError, setCpfError] = useState('');
   const [cepError, setCepError] = useState('');
   const [copied, setCopied] = useState(false);
   const [shippingAlert, setShippingAlert] = useState<{ oldPrice: number; newPrice: number; newName: string; oldName: string } | null>(null);
@@ -170,19 +143,6 @@ export default function Checkout() {
       return;
     }
 
-    // CPF validation: required + digit verification
-    const cleanCpf = formData.cpf.replace(/\D/g, '');
-    if (!cleanCpf) {
-      setCpfError('CPF e obrigatorio');
-      document.getElementById('cpf')?.focus();
-      return;
-    }
-    if (!validateCPF(cleanCpf)) {
-      setCpfError('CPF invalido. Verifique os digitos.');
-      document.getElementById('cpf')?.focus();
-      return;
-    }
-
     // CEP format validation
     const cleanCep = formData.cep.replace(/\D/g, '');
     if (cleanCep.length !== 8) {
@@ -206,7 +166,6 @@ export default function Checkout() {
     try {
       const data = await api.createOrder({
         name: formData.name, email: formData.email, whatsapp: formData.whatsapp,
-        cpf: formData.cpf.replace(/\D/g, ''),
         address: fullAddress,
         address_components: {
           street: formData.street, number: componentNumber, complement: formData.complement,
@@ -381,41 +340,9 @@ export default function Checkout() {
                   <p className="text-xs text-zinc-400 mt-1.5 flex items-center gap-1"><Mail size={12} /> Este e-mail sera usado para acompanhar seu pedido</p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="whatsapp" className="block text-sm font-medium text-zinc-700 mb-1">WhatsApp</label>
-                  <input type="tel" id="whatsapp" required value={formData.whatsapp} onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="(11) 99999-9999" />
-                </div>
-                <div>
-                  <label htmlFor="cpf" className="block text-sm font-medium text-zinc-700 mb-1">CPF</label>
-                  <input
-                    type="text"
-                    id="cpf"
-                    required
-                    inputMode="numeric"
-                    maxLength={14}
-                    value={formData.cpf}
-                    onChange={(e) => {
-                      const formatted = formatCPFInput(e.target.value);
-                      setFormData({ ...formData, cpf: formatted });
-                      if (cpfError) setCpfError('');
-                    }}
-                    onBlur={() => {
-                      const clean = formData.cpf.replace(/\D/g, '');
-                      if (clean.length === 11 && !validateCPF(clean)) {
-                        setCpfError('CPF invalido. Verifique os digitos.');
-                      } else if (clean.length > 0 && clean.length < 11) {
-                        setCpfError('CPF incompleto');
-                      } else {
-                        setCpfError('');
-                      }
-                    }}
-                    className={`w-full px-4 py-3 rounded-xl border ${cpfError ? 'border-red-400 focus:ring-red-400 focus:border-red-400' : 'border-zinc-200 focus:ring-emerald-500 focus:border-emerald-500'} focus:ring-2 outline-none transition-all`}
-                    placeholder="000.000.000-00"
-                  />
-                  {cpfError && <p className="text-xs text-red-500 mt-1 font-medium">{cpfError}</p>}
-                  <p className="text-xs text-zinc-400 mt-1">Necessario para envio pelos Correios</p>
-                </div>
+              <div>
+                <label htmlFor="whatsapp" className="block text-sm font-medium text-zinc-700 mb-1">WhatsApp</label>
+                <input type="tel" id="whatsapp" required value={formData.whatsapp} onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })} className="w-full sm:w-1/2 px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="(11) 99999-9999" />
               </div>
             </div>
           </div>

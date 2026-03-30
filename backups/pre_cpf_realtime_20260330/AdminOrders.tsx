@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { RefreshCw, Package, Clock, CreditCard, BoxIcon, Truck, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, ChevronUp, MessageCircle, MoreVertical, FileText, Trash2, Download, X, Share2, Tag, Wallet, Printer, Search, Filter, Zap, Square, CheckSquare, AlertTriangle, FileDown, RotateCcw } from 'lucide-react';
-import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel, batchFinalizeAndLabelSequential } from './adminApi';
+import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel } from './adminApi';
 import { LINE_COLORS } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -338,7 +338,8 @@ export default function AdminOrders() {
 
     try {
       if (bulkAction === 'pay_labels') {
-        // REAL-TIME sequential processing: one order at a time, frontend drives progress
+        // Sequential processing with progress bar via backend batch endpoint
+        // Build progress items from selected orders
         const progressItems = orderIds.map(oid => {
           const o = filteredOrders.find(o => String(o.medusa_order_id || o.id) === oid);
           return {
@@ -353,34 +354,32 @@ export default function AdminOrders() {
           current: 0, total: orderIds.length, succeeded: 0, failed: 0, items: progressItems,
         });
 
-        // Use the sequential function that calls onProgress for each order
-        const result = await batchFinalizeAndLabelSequential(orderIds, (update) => {
-          setProgressData(prev => {
-            const newItems = [...prev.items];
-            const idx = newItems.findIndex(item => item.id === update.orderId);
-            if (idx !== -1) {
-              if (update.step === 'generating') {
-                newItems[idx] = { ...newItems[idx], status: 'generating' };
-              } else if (update.step === 'paying') {
-                newItems[idx] = { ...newItems[idx], status: 'paying' };
-              } else if (update.step === 'completed') {
-                newItems[idx] = { ...newItems[idx], status: 'completed' };
-              } else if (update.step === 'error') {
-                newItems[idx] = { ...newItems[idx], status: 'error', error: update.error };
-              }
-            }
-            const completedCount = newItems.filter(i => i.status === 'completed' || i.status === 'error').length;
-            const succeededCount = newItems.filter(i => i.status === 'completed').length;
-            const failedCount = newItems.filter(i => i.status === 'error').length;
-            return {
-              ...prev,
-              current: completedCount,
-              succeeded: succeededCount,
-              failed: failedCount,
-              items: newItems,
-            };
-          });
+        // Mark all as generating
+        setProgressData(prev => ({
+          ...prev,
+          items: prev.items.map(item => ({ ...item, status: 'generating' as const })),
+        }));
+
+        // Call the backend batch endpoint (sequential processing with 2s delay is handled server-side)
+        const result = await batchFinalizeAndLabel(orderIds);
+
+        // Update progress with results
+        const finalItems = progressItems.map(item => {
+          const r = (result.results || []).find((r: any) =>
+            String(r.medusa_id) === item.id || String(r.id) === item.id
+          );
+          if (r?.success) return { ...item, status: 'completed' as const };
+          if (r) return { ...item, status: 'error' as const, error: r.error || 'Erro desconhecido' };
+          return { ...item, status: 'error' as const, error: 'Sem resposta' };
         });
+
+        setProgressData(prev => ({
+          ...prev,
+          current: orderIds.length,
+          succeeded: result.succeeded || 0,
+          failed: result.failed || 0,
+          items: finalItems,
+        }));
 
         setBulkResult({
           succeeded: result.succeeded || 0,

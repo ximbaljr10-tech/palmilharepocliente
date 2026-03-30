@@ -305,7 +305,6 @@ export const api = {
           customerName: orderData.name,
           customerEmail: orderData.email,
           customerWhatsapp: orderData.whatsapp,
-          customerCpf: orderData.cpf,
           customerAddress: orderData.address,
           addressComponents: orderData.address_components,
           items: orderData.items,

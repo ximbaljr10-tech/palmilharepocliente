@@ -4,9 +4,9 @@ import {
   ArrowLeft, User, MapPin, Package, Truck, CreditCard, Tag, ExternalLink,
   MessageCircle, Copy, Clock, BoxIcon, CheckCircle2, XCircle, Loader2,
   Archive, ArchiveRestore, AlertTriangle, Mail, Printer, RefreshCw, Wallet, Zap,
-  StickyNote, Save, FileDown, Edit3
+  StickyNote, Save, FileDown
 } from 'lucide-react';
-import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData } from './adminApi';
+import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation } from './adminApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -30,17 +30,6 @@ export default function AdminOrderDetail() {
   const [savingObs, setSavingObs] = useState(false);
   const [obsSaved, setObsSaved] = useState(false);
   const [generatingDecl, setGeneratingDecl] = useState(false);
-
-  // Customer data editing state
-  const [editingCustomer, setEditingCustomer] = useState(false);
-  const [savingCustomer, setSavingCustomer] = useState(false);
-  const [customerSaved, setCustomerSaved] = useState(false);
-  const [customerSaveError, setCustomerSaveError] = useState('');
-  const [editForm, setEditForm] = useState({
-    name: '', cpf: '',
-    street: '', number: '', complement: '', neighborhood: '', city: '', state: '', cep: '',
-  });
-  const [cpfError, setCpfError] = useState('');
 
   // Confirmation modal state for single-order actions
   const [confirmAction, setConfirmAction] = useState<{
@@ -74,19 +63,6 @@ export default function AdminOrderDetail() {
         setOrder(found);
         setTrackingInput(found.tracking_code || '');
         setObservation(found.admin_observation || '');
-        // Populate edit form with current customer data
-        const addr = found.address_components || {};
-        setEditForm({
-          name: found.customer_name || '',
-          cpf: found.customer_cpf || '',
-          street: addr.street || '',
-          number: addr.number || '',
-          complement: addr.complement || '',
-          neighborhood: addr.neighborhood || '',
-          city: addr.city || '',
-          state: addr.state || '',
-          cep: addr.cep || '',
-        });
       }
     } catch (err: any) {
       if (err.message?.includes('autenticado') || err.message?.includes('expirada')) {
@@ -413,46 +389,6 @@ export default function AdminOrderDetail() {
     setSavingObs(false);
   };
 
-  const handleSaveCustomerData = async () => {
-    if (!order) return;
-    
-    // Validate CPF if provided
-    const cleanCpf = editForm.cpf.replace(/\D/g, '');
-    if (cleanCpf && !validateCPF(cleanCpf)) {
-      setCpfError('CPF invalido. Verifique os digitos.');
-      return;
-    }
-    setCpfError('');
-    
-    setSavingCustomer(true);
-    setCustomerSaved(false);
-    setCustomerSaveError('');
-    
-    const result = await updateOrderCustomerData(order.id, order.medusa_order_id, {
-      customer_name: editForm.name,
-      customer_cpf: cleanCpf,
-      address_components: {
-        street: editForm.street,
-        number: editForm.number,
-        complement: editForm.complement,
-        neighborhood: editForm.neighborhood,
-        city: editForm.city,
-        state: editForm.state,
-        cep: editForm.cep.replace(/\D/g, ''),
-      },
-    });
-    
-    if (result.success) {
-      setCustomerSaved(true);
-      setEditingCustomer(false);
-      setTimeout(() => setCustomerSaved(false), 4000);
-      await loadOrder();
-    } else {
-      setCustomerSaveError(result.error || 'Erro ao salvar');
-    }
-    setSavingCustomer(false);
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -609,177 +545,50 @@ export default function AdminOrderDetail() {
         </div>
       )}
 
-      {/* ============ CUSTOMER + ADDRESS (Editable) ============ */}
+      {/* ============ CUSTOMER ============ */}
       <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
-            <User size={11} /> Cliente
-          </p>
-          <button
-            onClick={() => setEditingCustomer(!editingCustomer)}
-            className={`text-xs flex items-center gap-1 px-2 py-1 rounded-lg transition-colors ${
-              editingCustomer
-                ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
-                : 'text-zinc-400 hover:text-zinc-600 hover:bg-zinc-50'
-            }`}
-          >
-            <Edit3 size={11} />
-            {editingCustomer ? 'Editando' : 'Editar'}
-          </button>
+        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+          <User size={11} /> Cliente
+        </p>
+        <div className="space-y-2">
+          <p className="font-semibold text-sm text-zinc-900">{order.customer_name}</p>
+          {order.customer_email && (
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+              <Mail size={12} /> {order.customer_email}
+            </div>
+          )}
+          {order.customer_whatsapp && (
+            <a
+              href={`https://wa.me/55${order.customer_whatsapp.replace(/\D/g, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-emerald-600 hover:text-emerald-700 font-medium"
+            >
+              <MessageCircle size={13} /> {order.customer_whatsapp}
+            </a>
+          )}
         </div>
-
-        {customerSaved && (
-          <div className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg">
-            <CheckCircle2 size={12} /> Dados do cliente atualizados com sucesso!
-          </div>
-        )}
-        {customerSaveError && (
-          <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">
-            <AlertTriangle size={12} /> {customerSaveError}
-          </div>
-        )}
-        
-        {!editingCustomer ? (
-          /* ---- VIEW MODE ---- */
-          <div className="space-y-2">
-            <p className="font-semibold text-sm text-zinc-900">{order.customer_name}</p>
-            {order.customer_cpf && (
-              <p className="text-xs text-zinc-500">CPF: {formatCPF(order.customer_cpf)}</p>
-            )}
-            {!order.customer_cpf && (
-              <p className="text-xs text-amber-600 font-medium flex items-center gap-1">
-                <AlertTriangle size={10} /> CPF nao informado - edite para adicionar
-              </p>
-            )}
-            {order.customer_email && (
-              <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-                <Mail size={12} /> {order.customer_email}
-              </div>
-            )}
-            {order.customer_whatsapp && (
-              <a
-                href={`https://wa.me/55${order.customer_whatsapp.replace(/\D/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-emerald-600 hover:text-emerald-700 font-medium"
-              >
-                <MessageCircle size={13} /> {order.customer_whatsapp}
-              </a>
-            )}
-            {order.customer_address && (
-              <div className="pt-2 mt-2 border-t border-zinc-100">
-                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 mb-1.5">
-                  <MapPin size={10} /> Endereco
-                </p>
-                <div className="flex items-start gap-2">
-                  <p className="text-sm text-zinc-700 leading-relaxed flex-1">{order.customer_address}</p>
-                  <button
-                    onClick={copyAddress}
-                    className="shrink-0 p-1.5 text-zinc-300 hover:text-zinc-600 hover:bg-zinc-50 rounded-lg transition-colors"
-                    title="Copiar"
-                  >
-                    <Copy size={14} />
-                  </button>
-                </div>
-                {copiedAddress && <p className="text-xs text-emerald-600 font-medium">Endereco copiado!</p>}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* ---- EDIT MODE ---- */
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-zinc-600 mb-1">Nome Completo</label>
-              <input
-                type="text"
-                value={editForm.name}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none"
-                placeholder="Nome do cliente"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-600 mb-1">CPF</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={14}
-                value={editForm.cpf ? formatCPF(editForm.cpf) : ''}
-                onChange={(e) => {
-                  const cleaned = e.target.value.replace(/\D/g, '').slice(0, 11);
-                  setEditForm({ ...editForm, cpf: cleaned });
-                  if (cpfError) setCpfError('');
-                }}
-                onBlur={() => {
-                  const clean = editForm.cpf.replace(/\D/g, '');
-                  if (clean.length === 11 && !validateCPF(clean)) {
-                    setCpfError('CPF invalido. Verifique os digitos.');
-                  } else {
-                    setCpfError('');
-                  }
-                }}
-                className={`w-full px-3 py-2 rounded-lg border ${cpfError ? 'border-red-400' : 'border-zinc-200'} text-sm focus:ring-2 focus:ring-amber-400 outline-none`}
-                placeholder="000.000.000-00"
-              />
-              {cpfError && <p className="text-xs text-red-500 mt-0.5">{cpfError}</p>}
-            </div>
-            <div className="grid grid-cols-12 gap-2">
-              <div className="col-span-9">
-                <label className="block text-xs font-medium text-zinc-600 mb-1">Rua</label>
-                <input type="text" value={editForm.street} onChange={(e) => setEditForm({ ...editForm, street: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none" />
-              </div>
-              <div className="col-span-3">
-                <label className="block text-xs font-medium text-zinc-600 mb-1">Numero</label>
-                <input type="text" value={editForm.number} onChange={(e) => setEditForm({ ...editForm, number: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs font-medium text-zinc-600 mb-1">Complemento</label>
-                <input type="text" value={editForm.complement} onChange={(e) => setEditForm({ ...editForm, complement: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none" placeholder="Opcional" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-600 mb-1">Bairro</label>
-                <input type="text" value={editForm.neighborhood} onChange={(e) => setEditForm({ ...editForm, neighborhood: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none" />
-              </div>
-            </div>
-            <div className="grid grid-cols-12 gap-2">
-              <div className="col-span-6">
-                <label className="block text-xs font-medium text-zinc-600 mb-1">Cidade</label>
-                <input type="text" value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none" />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-medium text-zinc-600 mb-1">UF</label>
-                <input type="text" maxLength={2} value={editForm.state} onChange={(e) => setEditForm({ ...editForm, state: e.target.value.toUpperCase() })} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none uppercase" />
-              </div>
-              <div className="col-span-4">
-                <label className="block text-xs font-medium text-zinc-600 mb-1">CEP</label>
-                <input type="text" maxLength={9} value={editForm.cep} onChange={(e) => {
-                  let v = e.target.value.replace(/\D/g, '').slice(0, 8);
-                  if (v.length > 5) v = v.slice(0, 5) + '-' + v.slice(5);
-                  setEditForm({ ...editForm, cep: v });
-                }} className="w-full px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-400 outline-none" placeholder="00000-000" />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={handleSaveCustomerData}
-                disabled={savingCustomer}
-                className="bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-amber-600 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
-              >
-                {savingCustomer ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                {savingCustomer ? 'Salvando...' : 'Salvar Dados'}
-              </button>
-              <button
-                onClick={() => { setEditingCustomer(false); setCpfError(''); setCustomerSaveError(''); }}
-                className="text-zinc-400 hover:text-zinc-600 px-3 py-2 rounded-lg text-xs transition-colors"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* ============ ADDRESS ============ */}
+      {order.customer_address && (
+        <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 space-y-2">
+          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+            <MapPin size={11} /> Endereco de Entrega
+          </p>
+          <div className="flex items-start gap-2">
+            <p className="text-sm text-zinc-700 leading-relaxed flex-1">{order.customer_address}</p>
+            <button
+              onClick={copyAddress}
+              className="shrink-0 p-1.5 text-zinc-300 hover:text-zinc-600 hover:bg-zinc-50 rounded-lg transition-colors"
+              title="Copiar"
+            >
+              <Copy size={14} />
+            </button>
+          </div>
+          {copiedAddress && <p className="text-xs text-emerald-600 font-medium">Endereco copiado!</p>}
+        </div>
+      )}
 
       {/* ============ ITEMS ============ */}
       <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 space-y-3">
