@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - P7 Bot CPFL</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .logo { font-size: 24px; font-weight: bold; color: #333; }
+        .nav { display: flex; gap: 20px; }
+        .nav a { text-decoration: none; color: #555; padding: 10px; border-radius: 4px; transition: background 0.3s; }
+        .nav a:hover, .nav a.active { background: #eef2f5; color: #007bff; }
+        .container { display: flex; gap: 20px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 20px; flex: 1; }
+        h2 { margin-top: 0; color: #444; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        
+        /* Pairing Section */
+        .pairing-input { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; color: #666; }
+        input[type="tel"] { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
+        button.generate-btn { background-color: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; transition: background 0.3s; }
+        button.generate-btn:hover { background-color: #218838; }
+        
+        .code-display { margin-top: 20px; background: #f8f9fa; border: 2px dashed #ccc; padding: 20px; text-align: center; border-radius: 8px; }
+        .code-text { font-size: 32px; font-family: monospace; letter-spacing: 5px; color: #333; font-weight: bold; }
+        .status { margin-top: 10px; font-size: 14px; color: #888; }
+        
+        /* PDF Section */
+        .pdf-list { list-style: none; padding: 0; }
+        .pdf-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee; }
+        .pdf-item:last-child { border-bottom: none; }
+        .pdf-name { font-weight: 500; color: #333; }
+        .pdf-date { color: #888; font-size: 12px; }
+        .pdf-actions button { background: none; border: 1px solid #ddd; padding: 5px 10px; border-radius: 4px; cursor: pointer; color: #555; font-size: 12px; }
+        .pdf-actions button:hover { background: #f0f0f0; }
+
+        .hidden { display: none; }
+        .loading { color: #007bff; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="logo">P7 CPFL Bot Manager</div>
+        <div class="nav">
+            <a href="#" class="active" onclick="showSection('pairing')">Pairing</a>
+            <a href="#" onclick="showSection('pdfs')">PDFs</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Pairing Section -->
+        <div id="section-pairing" class="card">
+            <h2>WhatsApp Pairing</h2>
+            <p style="color: #666; font-size: 14px;">Enter the phone number (with country code, e.g., 5581988888888) to generate a pairing code.</p>
+            
+            <div class="pairing-input">
+                <label for="phoneNumber">Phone Number</label>
+                <input type="tel" id="phoneNumber" placeholder="55819xxxxxxxxx" value="5581988888888">
+            </div>
+            
+            <button class="generate-btn" onclick="generateCode()">Generate Pairing Code</button>
+            
+            <div class="code-display" id="codeContainer" style="display: none;">
+                <div class="status" id="codeStatus">Waiting for code...</div>
+                <div class="code-text" id="pairingCode">---- ----</div>
+            </div>
+        </div>
+
+        <!-- PDF Section (Mock) -->
+        <div id="section-pdfs" class="card hidden">
+            <h2>Manage PDFs</h2>
+            <p style="color: #666; font-size: 14px;">Recent audit reports and bills processed by the bot.</p>
+            <ul class="pdf-list" id="pdfList">
+                <li class="pdf-item">Loading...</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Check "session" (simple check)
+        // In real app use cookies/tokens
+        
+        function showSection(section) {
+            document.getElementById('section-pairing').classList.add('hidden');
+            document.getElementById('section-pdfs').classList.add('hidden');
+            document.querySelectorAll('.nav a').forEach(el => el.classList.remove('active'));
+            
+            if (section === 'pairing') {
+                document.getElementById('section-pairing').classList.remove('hidden');
+                document.querySelector('.nav a:nth-child(1)').classList.add('active');
+            } else if (section === 'pdfs') {
+                document.getElementById('section-pdfs').classList.remove('hidden');
+                document.querySelector('.nav a:nth-child(2)').classList.add('active');
+                loadPDFs();
+            }
+        }
+
+        function logout() {
+            window.location.href = '/botzincpfl';
+        }
+
+        async function generateCode() {
+            const phone = document.getElementById('phoneNumber').value;
+            const statusEl = document.getElementById('codeStatus');
+            const codeEl = document.getElementById('pairingCode');
+            const container = document.getElementById('codeContainer');
+            
+            if (!phone) {
+                alert('Please enter a phone number');
+                return;
+            }
+
+            container.style.display = 'block';
+            statusEl.textContent = 'Requesting code from WhatsApp...';
+            statusEl.className = 'status loading';
+            codeEl.textContent = '...';
+
+            try {
+                // 1. Start Pairing Request
+                const res = await fetch('/api/pairing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    // 2. Poll for Code
+                    let attempts = 0;
+                    const interval = setInterval(async () => {
+                        attempts++;
+                        try {
+                            const codeRes = await fetch('/api/code');
+                            const codeData = await codeRes.json();
+                            
+                            if (codeData.code && codeData.code !== 'Generating...' && codeData.code !== 'ERROR_GEN') {
+                                clearInterval(interval);
+                                statusEl.textContent = 'Code generated successfully!';
+                                statusEl.className = 'status';
+                                statusEl.style.color = 'green';
+                                codeEl.textContent = codeData.code;
+                            } else if (codeData.code === 'ERROR_GEN') {
+                                clearInterval(interval);
+                                statusEl.textContent = 'Error generating code. Check logs.';
+                                statusEl.className = 'status error';
+                            }
+                            
+                            if (attempts > 20) { // 10s timeout
+                                clearInterval(interval);
+                                statusEl.textContent = 'Timeout waiting for code.';
+                                statusEl.className = 'status error';
+                            }
+                        } catch (e) {
+                            console.error(e);
+                        }
+                    }, 1000); // Check every 1s
+                } else {
+                    statusEl.textContent = 'Failed to start pairing: ' + data.message;
+                    statusEl.className = 'status error';
+                }
+
+            } catch (err) {
+                statusEl.textContent = 'Network error.';
+                statusEl.className = 'status error';
+            }
+        }
+
+        async function loadPDFs() {
+            const list = document.getElementById('pdfList');
+            try {
+                const res = await fetch('/api/pdfs');
+                const pdfs = await res.json();
+                
+                list.innerHTML = '';
+                pdfs.forEach(pdf => {
+                    const li = document.createElement('li');
+                    li.className = 'pdf-item';
+                    li.innerHTML = `
+                        <div>
+                            <div class="pdf-name">${pdf.name}</div>
+                            <div class="pdf-date">${pdf.date}</div>
+                        </div>
+                        <div class="pdf-actions">
+                            <button onclick="alert('Viewing ${pdf.name}')">View</button>
+                            <button onclick="alert('Downloading ${pdf.name}')">Download</button>
+                        </div>
+                    `;
+                    list.appendChild(li);
+                });
+            } catch (err) {
+                list.innerHTML = '<li class="pdf-item">Error loading PDFs</li>';
+            }
+        }
+    </script>
+</body>
+</html>
