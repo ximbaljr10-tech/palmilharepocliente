@@ -71,21 +71,39 @@ export default function AdminOrderDetail() {
       const orders = Array.isArray(data) ? data : [];
       const found = orders.find((o: any) => String(o.id) === String(id));
       if (found) {
-        setOrder(found);
+        // Preserve local customer_cpf if server returned null but we have a local value
+        // This handles the race condition where Medusa hasn't flushed the metadata write yet
+        setOrder((prevOrder: any) => {
+          const serverCpf = found.customer_cpf;
+          const localCpf = prevOrder?.customer_cpf;
+          
+          // If server has no CPF but local state has one (just saved), keep local
+          // This prevents the "CPF disappears after save" bug
+          if (!serverCpf && localCpf && prevOrder?.id === found.id) {
+            console.log(`[loadOrder] Preserving local CPF "${localCpf}" (server returned null — likely stale)`);
+            return { ...found, customer_cpf: localCpf };
+          }
+          return found;
+        });
         setTrackingInput(found.tracking_code || '');
         setObservation(found.admin_observation || '');
         // Populate edit form with current customer data
         const addr = found.address_components || {};
-        setEditForm({
-          name: found.customer_name || '',
-          cpf: found.customer_cpf || '',
-          street: addr.street || '',
-          number: addr.number || '',
-          complement: addr.complement || '',
-          neighborhood: addr.neighborhood || '',
-          city: addr.city || '',
-          state: addr.state || '',
-          cep: addr.cep || '',
+        setEditForm((prevForm) => {
+          // Use server CPF if available, otherwise preserve what's in the form
+          const serverCpf = found.customer_cpf;
+          const formCpf = prevForm.cpf;
+          return {
+            name: found.customer_name || '',
+            cpf: serverCpf || formCpf || '',
+            street: addr.street || '',
+            number: addr.number || '',
+            complement: addr.complement || '',
+            neighborhood: addr.neighborhood || '',
+            city: addr.city || '',
+            state: addr.state || '',
+            cep: addr.cep || '',
+          };
         });
       }
     } catch (err: any) {
@@ -112,6 +130,9 @@ export default function AdminOrderDetail() {
 
       const result = await adminFetch('/admin/pedidos', { method: 'PUT', body: JSON.stringify(body) });
 
+      // Optimistic local update for instant UI feedback
+      setOrder((prev: any) => prev ? { ...prev, status, ...(tracking_code ? { tracking_code } : {}) } : prev);
+
       if (result.superfrete) {
         if (result.superfrete.success) {
           setSuperfreteMsg({ success: true, message: `Etiqueta criada no SuperFrete (ID: ${result.superfrete.data?.id || ''}).` });
@@ -119,7 +140,8 @@ export default function AdminOrderDetail() {
           setSuperfreteMsg({ success: false, message: `Erro SuperFrete: ${result.superfrete.error}` });
         }
       }
-      await loadOrder();
+      // Delayed reload to get full server state without overwriting optimistic update
+      setTimeout(() => { loadOrder().catch(() => {}); }, 1500);
     } catch (err: any) {
       alert('Erro ao atualizar pedido');
     } finally {
@@ -140,11 +162,17 @@ export default function AdminOrderDetail() {
         body: JSON.stringify(body),
       });
       if (result.superfrete?.success) {
+        // Optimistic update for label data
+        setOrder((prev: any) => prev ? {
+          ...prev,
+          superfrete_id: result.order?.superfrete_id || prev.superfrete_id,
+          superfrete_status: 'pending',
+        } : prev);
         setSuperfreteMsg({ success: true, message: `Etiqueta criada (ID: ${result.order?.superfrete_id || ''}).` });
       } else {
         setSuperfreteMsg({ success: false, message: `Erro: ${result.superfrete?.error || result.error || 'desconhecido'}` });
       }
-      await loadOrder();
+      setTimeout(() => { loadOrder().catch(() => {}); }, 1500);
     } catch {
       alert('Erro ao gerar etiqueta');
     } finally {
@@ -166,12 +194,21 @@ export default function AdminOrderDetail() {
         body: JSON.stringify(body),
       });
       if (result.success) {
+        // Optimistic update
+        setOrder((prev: any) => prev ? {
+          ...prev,
+          status: 'preparing',
+          superfrete_id: result.order?.superfrete_id || prev.superfrete_id,
+          superfrete_status: result.order?.superfrete_status || 'released',
+          tracking_code: result.order?.tracking_code || prev.tracking_code,
+          superfrete_tracking: result.order?.superfrete_tracking || prev.superfrete_tracking,
+        } : prev);
         const trackInfo = result.order?.tracking_code ? ` · Rastreio: ${result.order.tracking_code}` : '';
         setSuperfreteMsg({ success: true, message: `Pedido finalizado com sucesso! Etiqueta gerada e paga.${trackInfo}` });
       } else {
         setSuperfreteMsg({ success: false, message: `Erro: ${result.error || 'desconhecido'} (etapa: ${result.step || 'N/A'})` });
       }
-      await loadOrder();
+      setTimeout(() => { loadOrder().catch(() => {}); }, 1500);
     } catch (err: any) {
       setSuperfreteMsg({ success: false, message: `Erro: ${err.message || 'falha na operacao'}` });
     } finally {
@@ -193,10 +230,19 @@ export default function AdminOrderDetail() {
       if (result.success) {
         const changed = result.status_changed ? ' (status atualizado)' : ' (sem alteracao)';
         setSuperfreteMsg({ success: true, message: `Sincronizado com SuperFrete${changed}. Status SF: ${result.order?.superfrete_status || 'N/A'}` });
+        // Optimistic update
+        if (result.order) {
+          setOrder((prev: any) => prev ? {
+            ...prev,
+            status: result.order.status || prev.status,
+            superfrete_status: result.order.superfrete_status || prev.superfrete_status,
+            tracking_code: result.order.tracking_code || prev.tracking_code,
+          } : prev);
+        }
       } else {
         setSuperfreteMsg({ success: false, message: result.error || 'Erro ao sincronizar' });
       }
-      await loadOrder();
+      setTimeout(() => { loadOrder().catch(() => {}); }, 1500);
     } catch (err: any) {
       setSuperfreteMsg({ success: false, message: err.message || 'Erro' });
     } finally {
@@ -370,8 +416,9 @@ export default function AdminOrderDetail() {
     console.log('Archiving order:', order.id, 'medusa_order_id:', order.medusa_order_id);
     const success = await archiveOrderBackend(order.id, order.medusa_order_id);
     if (success) {
-      await loadOrder();
+      setOrder((prev: any) => prev ? { ...prev, archived: true } : prev);
       setShowArchiveConfirm(false);
+      setTimeout(() => { loadOrder().catch(() => {}); }, 1500);
     } else {
       alert('Erro ao arquivar. Tente novamente.');
     }
@@ -384,7 +431,8 @@ export default function AdminOrderDetail() {
     console.log('Unarchiving order:', order.id, 'medusa_order_id:', order.medusa_order_id);
     const success = await unarchiveOrderBackend(order.id, order.medusa_order_id);
     if (success) {
-      await loadOrder();
+      setOrder((prev: any) => prev ? { ...prev, archived: false } : prev);
+      setTimeout(() => { loadOrder().catch(() => {}); }, 1500);
     } else {
       alert('Erro ao desarquivar. Tente novamente.');
     }
@@ -405,6 +453,8 @@ export default function AdminOrderDetail() {
     setObsSaved(false);
     const success = await saveOrderObservation(order.id, observation, order.medusa_order_id);
     if (success) {
+      // Update local state immediately so admin_observation reflects new value
+      setOrder((prev: any) => prev ? { ...prev, admin_observation: observation } : prev);
       setObsSaved(true);
       setTimeout(() => setObsSaved(false), 3000);
     } else {
@@ -443,10 +493,58 @@ export default function AdminOrderDetail() {
     });
     
     if (result.success) {
+      // Use server response data as source of truth for CPF
+      // This prevents the stale-data bug where loadOrder() returns old metadata
+      const serverCpf = result.order?.customer_cpf || null;
+      const serverName = result.order?.customer_name || editForm.name || order.customer_name;
+      const serverAddress = result.order?.customer_address || '';
+      const serverAddrComponents = result.order?.address_components || null;
+
+      const newCep = editForm.cep.replace(/\D/g, '');
+      
+      // Build address components from editForm (local truth until server confirms)
+      const updatedAddrComponents = serverAddrComponents || {
+        ...(order.address_components || {}),
+        street: editForm.street,
+        number: editForm.number,
+        complement: editForm.complement,
+        neighborhood: editForm.neighborhood,
+        city: editForm.city,
+        state: editForm.state,
+        cep: newCep,
+      };
+      
+      // Rebuild full address string
+      const addr = updatedAddrComponents;
+      const addrNum = addr.number || 'S/N';
+      const compStr = addr.complement ? ` - ${addr.complement}` : '';
+      const rebuiltAddress = serverAddress || `${addr.street || ''}, ${addrNum}${compStr}, ${addr.neighborhood || ''}, ${addr.city || ''} - ${addr.state || ''}, CEP: ${addr.cep || ''}`;
+      
+      // CRITICAL: Update local order state using SERVER response data
+      // This is the definitive update — no more "CPF disappearing" after save
+      setOrder((prev: any) => prev ? {
+        ...prev,
+        customer_name: serverName,
+        customer_cpf: serverCpf,
+        customer_address: rebuiltAddress,
+        address_components: updatedAddrComponents,
+      } : prev);
+      
+      // Also update the editForm to match what server confirmed
+      setEditForm(prev => ({
+        ...prev,
+        name: serverName,
+        cpf: serverCpf || '',
+        cep: newCep,
+      }));
+      
       setCustomerSaved(true);
       setEditingCustomer(false);
       setTimeout(() => setCustomerSaved(false), 4000);
-      await loadOrder();
+      
+      // Delayed reload: use a longer delay to ensure Medusa has flushed the write
+      // This is a safety net — the optimistic update above already shows correct data
+      setTimeout(() => { loadOrder().catch(() => {}); }, 3000);
     } else {
       setCustomerSaveError(result.error || 'Erro ao salvar');
     }

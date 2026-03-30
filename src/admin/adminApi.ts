@@ -439,7 +439,7 @@ export async function updateOrderCustomerData(
   orderId: number,
   medusa_order_id: string,
   data: CustomerEditData,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; order?: any }> {
   try {
     const body: any = {
       orderId,
@@ -451,7 +451,8 @@ export async function updateOrderCustomerData(
       method: 'PUT',
       body: JSON.stringify(body),
     });
-    return { success: !!result.success };
+    // Return the full order data from the response so frontend can use it directly
+    return { success: !!result.success, order: result.order || null };
   } catch (err: any) {
     console.error('Erro ao atualizar dados do cliente:', err);
     return { success: false, error: err.message };
