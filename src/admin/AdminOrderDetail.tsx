@@ -6,7 +6,7 @@ import {
   Archive, ArchiveRestore, AlertTriangle, Mail, Printer, RefreshCw, Wallet, Zap,
   StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History
 } from 'lucide-react';
-import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, getShippingByYards, extractYards } from './adminApi';
+import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, getShippingByYards, extractYards } from './adminApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 

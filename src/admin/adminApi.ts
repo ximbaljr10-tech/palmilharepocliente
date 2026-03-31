@@ -497,8 +497,10 @@ export async function swapOrderItem(payload: SwapItemPayload): Promise<{
 // Check if order allows product swap
 // BUSINESS RULE:
 //   - Allowed: status is 'awaiting_payment' or 'paid'
-//   - BLOCKED: if label was generated (superfrete_id exists) OR tracking exists
-//   - The primary blocking criterion is LABEL GENERATED, not payment status
+//   - BLOCKED: if an ACTIVE label exists (superfrete_id set) OR active tracking exists
+//   - NOT blocked by historical label data (e.g., label_generated_at from a cancelled label)
+//   - Orders restored from cancelled->paid have old label data cleared but may retain
+//     label_generated_at as historical; this must NOT block swaps.
 export function canSwapItems(order: any): boolean {
   if (!order) return false;
   const status = order.status || order.custom_status || '';
@@ -507,32 +509,45 @@ export function canSwapItems(order: any): boolean {
   const allowedStatuses = ['awaiting_payment', 'paid'];
   if (!allowedStatuses.includes(status)) return false;
   
-  // Block if label was generated (THE MAIN CRITERION)
-  if (hasLabelGenerated(order)) return false;
+  // Block if ACTIVE label/tracking exists (THE MAIN CRITERION)
+  if (hasActiveLabelOrTracking(order)) return false;
   
   return true;
 }
 
-// Check if order has a shipping label generated
-export function hasLabelGenerated(order: any): boolean {
+// Check if order has an ACTIVE shipping label or tracking code.
+// This checks CURRENT logistic state, not historical data.
+// An order that was cancelled and restored to paid will have superfrete_id=null
+// but may still have label_generated_at from the old (now-cancelled) label.
+// That historical data must NOT block swaps.
+export function hasActiveLabelOrTracking(order: any): boolean {
   if (!order) return false;
+  // Active SuperFrete label ID means a label currently exists
   if (order.superfrete_id) return true;
+  // Active tracking code means shipment is in transit
   if (order.tracking_code) return true;
+  // Active SuperFrete tracking
   if (order.superfrete_tracking) return true;
-  if (order.label_generated_at) return true;
+  // NOTE: label_generated_at is NOT checked here.
+  // It is a historical timestamp that persists even after label cancellation and order restoration.
+  // The active state is determined by superfrete_id (label exists) and tracking_code (shipment in transit).
   return false;
+}
+
+// Legacy alias for backward compatibility
+export function hasLabelGenerated(order: any): boolean {
+  return hasActiveLabelOrTracking(order);
 }
 
 // Get human-readable reason why swap is blocked
 export function getSwapBlockedReason(order: any): string {
   if (!order) return 'Pedido nao encontrado';
-  const status = order.status || '';
+  const status = order.status || order.custom_status || '';
   
-  // First check label/tracking (primary blocking criterion)
-  if (order.superfrete_id) return 'Etiqueta SuperFrete ja foi gerada';
-  if (order.tracking_code) return 'Ja existe codigo de rastreio';
-  if (order.superfrete_tracking) return 'Ja existe rastreio SuperFrete';
-  if (order.label_generated_at) return 'Etiqueta ja foi gerada';
+  // First check ACTIVE label/tracking (primary blocking criterion)
+  if (order.superfrete_id) return 'Etiqueta SuperFrete ativa para este pedido';
+  if (order.tracking_code) return 'Ja existe codigo de rastreio ativo';
+  if (order.superfrete_tracking) return 'Ja existe rastreio SuperFrete ativo';
   
   // Then check status
   if (['preparing', 'shipped', 'delivered', 'cancelled'].includes(status)) {
