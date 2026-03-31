@@ -2118,6 +2118,7 @@ function OrderListItem({ order, onClick, showCheckbox, isSelected, onToggleSelec
   const shippingName = order.shipping_service === 1 ? 'PAC' : order.shipping_service === 2 ? 'SEDEX' : '';
   const itemCount = order.items?.length || 0;
   const hasLabel = !!order.superfrete_id;
+  const missingCPF = !order.customer_cpf;
 
   return (
     <div className="flex items-center gap-1.5 w-full max-w-full overflow-hidden">
@@ -2133,10 +2134,21 @@ function OrderListItem({ order, onClick, showCheckbox, isSelected, onToggleSelec
       )}
       <button
         onClick={onClick}
-        className={`flex-1 min-w-0 bg-white rounded-xl border p-3 sm:p-4 flex items-center gap-2.5 hover:border-zinc-300 hover:shadow-sm transition-all text-left group active:scale-[0.99] overflow-hidden ${
+        className={`flex-1 min-w-0 bg-white rounded-xl border p-3 sm:p-4 flex items-center gap-2.5 hover:border-zinc-300 hover:shadow-sm transition-all text-left group active:scale-[0.99] overflow-hidden relative ${
           isSelected ? 'border-zinc-400 bg-zinc-50' : 'border-zinc-100'
         }`}
       >
+      {/* CPF Missing Ribbon — top-right corner, only when CPF is absent */}
+      {missingCPF && (
+        <div
+          className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] sm:text-[9px] font-bold uppercase tracking-wide leading-none flex items-center gap-0.5 sm:gap-1 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-bl-lg shadow-sm pointer-events-none select-none"
+          style={{ zIndex: 2 }}
+        >
+          <AlertTriangle size={8} className="shrink-0 sm:w-[10px] sm:h-[10px]" />
+          <span>Sem CPF</span>
+        </div>
+      )}
+
       {/* Status Dot */}
       <div className={`w-2 h-2 rounded-full ${sc.dot} shrink-0`} />
 
