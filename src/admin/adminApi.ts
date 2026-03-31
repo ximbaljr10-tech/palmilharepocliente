@@ -436,15 +436,18 @@ export interface CustomerEditData {
 }
 
 // ============ PRODUCT SEARCH (for swap) ============
-export async function searchProducts(query: string, limit = 20): Promise<any[]> {
+export async function searchProducts(query: string, limit = 30): Promise<any[]> {
   try {
     const params = new URLSearchParams({
-      q: query,
+      q: query.trim(),
       limit: String(limit),
       status: 'published',
     });
+    console.log(`[searchProducts] Searching for: "${query.trim()}"`);
     const result = await adminFetch(`/admin/produtos-custom?${params.toString()}`);
-    return result.products || [];
+    const products = result.products || [];
+    console.log(`[searchProducts] Backend returned ${products.length} products for "${query.trim()}"`);
+    return products;
   } catch (err) {
     console.error('Erro ao buscar produtos:', err);
     return [];
@@ -459,7 +462,7 @@ export interface SwapItemPayload {
   new_product_id: string;
   new_variant_id: string;
   new_product_title: string;
-  new_product_price: number;
+  new_product_price: number; // in REAIS (same as Medusa unit_price in this system)
   new_product_image: string;
   new_product_shipping: {
     height: number;
@@ -492,22 +495,46 @@ export async function swapOrderItem(payload: SwapItemPayload): Promise<{
 }
 
 // Check if order allows product swap
+// BUSINESS RULE:
+//   - Allowed: status is 'awaiting_payment' or 'paid'
+//   - BLOCKED: if label was generated (superfrete_id exists) OR tracking exists
+//   - The primary blocking criterion is LABEL GENERATED, not payment status
 export function canSwapItems(order: any): boolean {
   if (!order) return false;
   const status = order.status || order.custom_status || '';
+  
+  // Block by status: only allow swap in these early states
   const allowedStatuses = ['awaiting_payment', 'paid'];
   if (!allowedStatuses.includes(status)) return false;
-  if (order.superfrete_id) return false;
-  if (order.tracking_code) return false;
-  if (order.superfrete_tracking) return false;
-  if (order.label_generated_at) return false;
+  
+  // Block if label was generated (THE MAIN CRITERION)
+  if (hasLabelGenerated(order)) return false;
+  
   return true;
+}
+
+// Check if order has a shipping label generated
+export function hasLabelGenerated(order: any): boolean {
+  if (!order) return false;
+  if (order.superfrete_id) return true;
+  if (order.tracking_code) return true;
+  if (order.superfrete_tracking) return true;
+  if (order.label_generated_at) return true;
+  return false;
 }
 
 // Get human-readable reason why swap is blocked
 export function getSwapBlockedReason(order: any): string {
   if (!order) return 'Pedido nao encontrado';
   const status = order.status || '';
+  
+  // First check label/tracking (primary blocking criterion)
+  if (order.superfrete_id) return 'Etiqueta SuperFrete ja foi gerada';
+  if (order.tracking_code) return 'Ja existe codigo de rastreio';
+  if (order.superfrete_tracking) return 'Ja existe rastreio SuperFrete';
+  if (order.label_generated_at) return 'Etiqueta ja foi gerada';
+  
+  // Then check status
   if (['preparing', 'shipped', 'delivered', 'cancelled'].includes(status)) {
     const labels: Record<string, string> = {
       preparing: 'em preparacao',
@@ -517,9 +544,7 @@ export function getSwapBlockedReason(order: any): string {
     };
     return `Pedido esta ${labels[status] || status}`;
   }
-  if (order.superfrete_id) return 'Etiqueta SuperFrete ja foi gerada';
-  if (order.tracking_code) return 'Ja existe codigo de rastreio';
-  if (order.label_generated_at) return 'Etiqueta ja foi gerada';
+  
   return 'Troca nao permitida neste estado';
 }
 
@@ -550,10 +575,12 @@ export function extractYards(title: string): number | null {
 }
 
 // Map Medusa admin product to a simpler format for swap UI
+// IMPORTANT: In this system, prices are stored in REAIS (not centavos).
+// Admin API returns variant.prices[].amount in reais (e.g., 45.4 = R$ 45,40)
 export function mapAdminProduct(p: any): {
   id: string;
   title: string;
-  price: number;
+  price: number; // in REAIS (e.g., 45.4 = R$ 45,40)
   image_url: string;
   variant_id: string;
   yards: number | null;
@@ -561,7 +588,9 @@ export function mapAdminProduct(p: any): {
   status: string;
 } {
   const variant = p.variants?.[0];
-  const price = variant?.prices?.[0]?.amount || 0;
+  // Admin API returns prices in REAIS (e.g., 45.4, 140.3)
+  const price = variant?.prices?.[0]?.amount || variant?.calculated_price?.calculated_amount || 0;
+  
   const image = p.images?.[0]?.url || p.thumbnail || '';
   const meta = p.metadata || {};
   const yards = extractYards(p.title || '');
@@ -570,7 +599,7 @@ export function mapAdminProduct(p: any): {
   return {
     id: p.id,
     title: p.title || '',
-    price,
+    price, // REAIS
     image_url: image,
     variant_id: variant?.id || '',
     yards,

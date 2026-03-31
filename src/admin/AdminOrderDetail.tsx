@@ -6,7 +6,7 @@ import {
   Archive, ArchiveRestore, AlertTriangle, Mail, Printer, RefreshCw, Wallet, Zap,
   StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History
 } from 'lucide-react';
-import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, getShippingByYards, extractYards } from './adminApi';
+import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, getShippingByYards, extractYards } from './adminApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -590,22 +590,32 @@ export default function AdminOrderDetail() {
     
     if (query.trim().length < 2) {
       setSwapSearchResults([]);
+      setSwapSearching(false);
       return;
     }
 
     setSwapSearching(true);
     swapSearchTimeout.current = setTimeout(async () => {
-      const results = await searchProducts(query.trim());
-      const mapped = results.map(mapAdminProduct).filter(p => p.variant_id);
-      setSwapSearchResults(mapped);
-      setSwapSearching(false);
-    }, 400);
+      try {
+        const results = await searchProducts(query.trim());
+        const mapped = results.map(mapAdminProduct).filter(p => p.variant_id && p.status === 'published');
+        setSwapSearchResults(mapped);
+      } catch (err) {
+        console.error('Swap search error:', err);
+        setSwapSearchResults([]);
+      } finally {
+        setSwapSearching(false);
+      }
+    }, 500);
   };
 
   const selectSwapProduct = (product: any) => {
     setSwapSelectedProduct(product);
     setSwapConfirming(true);
   };
+
+  // Format price (in REAIS) helper
+  const fmtPrice = (reais: number) => formatCurrency(reais);
 
   const executeSwap = async () => {
     if (!order || swapItemIndex === null || !swapSelectedProduct) return;
@@ -623,19 +633,32 @@ export default function AdminOrderDetail() {
       new_product_id: swapSelectedProduct.id,
       new_variant_id: swapSelectedProduct.variant_id,
       new_product_title: swapSelectedProduct.title,
-      new_product_price: swapSelectedProduct.price,
+      new_product_price: swapSelectedProduct.price, // already in reais
       new_product_image: swapSelectedProduct.image_url,
       new_product_shipping: swapSelectedProduct.shipping,
       quantity: oldItem.quantity || 1,
     });
 
     if (result.success) {
-      setSwapResult({ success: true, message: 'Produto trocado com sucesso! Pedido recalculado.' });
-      // Reload order after short delay
+      // Build detailed success message with difference info
+      const swap = result.swap;
+      let diffMsg = 'Produto trocado com sucesso!';
+      if (swap) {
+        const totalDiff = (swap.after?.total || 0) - (swap.before?.total || 0);
+        if (totalDiff > 0) {
+          diffMsg += ` Diferenca a cobrar: +R$ ${formatCurrency(totalDiff)}`;
+        } else if (totalDiff < 0) {
+          diffMsg += ` Diferenca a devolver: -R$ ${formatCurrency(Math.abs(totalDiff))}`;
+        } else {
+          diffMsg += ' Sem diferenca no valor total.';
+        }
+      }
+      setSwapResult({ success: true, message: diffMsg });
+      // Reload order after delay
       setTimeout(() => {
         loadOrder().catch(() => {});
         closeSwapModal();
-      }, 2000);
+      }, 2500);
     } else {
       setSwapResult({ success: false, message: result.error || 'Erro ao trocar produto' });
     }
@@ -977,8 +1000,13 @@ export default function AdminOrderDetail() {
             <Package size={11} /> Itens do Pedido
           </p>
           {canSwapItems(order) && (
-            <span className="text-[10px] text-emerald-500 font-medium flex items-center gap-1">
+            <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full">
               <ArrowRightLeft size={10} /> Troca disponivel
+            </span>
+          )}
+          {!canSwapItems(order) && hasLabelGenerated(order) && ['awaiting_payment', 'paid'].includes(order.status) && (
+            <span className="text-[10px] text-amber-600 font-medium flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-full">
+              <ShieldAlert size={9} /> Etiqueta gerada
             </span>
           )}
         </div>
@@ -1002,6 +1030,8 @@ export default function AdminOrderDetail() {
               cp.product_id === item.product_id || cp.variant_id === item.variant_id
             );
             const swapAllowed = canSwapItems(order);
+            // Prices in order items are in centavos
+            const itemPrice = Number(item.price || item.unit_price || 0);
 
             return (
               <div key={idx} className="bg-zinc-50 rounded-xl p-2.5 space-y-1.5">
@@ -1012,7 +1042,7 @@ export default function AdminOrderDetail() {
                   <span className="flex-1 line-clamp-2 text-zinc-700 text-xs sm:text-sm">{item.title}</span>
                   <span className="text-zinc-400 text-xs shrink-0">{item.quantity}x</span>
                   <span className="font-semibold text-zinc-900 text-xs sm:text-sm whitespace-nowrap shrink-0">
-                    R$ {formatCurrency(Number(item.price) * item.quantity)}
+                    R$ {formatCurrency(itemPrice * item.quantity)}
                   </span>
                 </div>
                 {/* Swap button */}
@@ -1020,16 +1050,16 @@ export default function AdminOrderDetail() {
                   <div className="flex justify-end">
                     <button
                       onClick={() => openSwapModal(idx)}
-                      className="text-[10px] text-blue-500 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded-lg flex items-center gap-1 transition-colors font-medium"
+                      className="text-[10px] text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors font-semibold border border-blue-200 hover:border-blue-300"
                     >
                       <ArrowRightLeft size={10} /> Trocar produto
                     </button>
                   </div>
                 )}
                 {/* Blocked swap indicator */}
-                {!swapAllowed && ['awaiting_payment', 'paid'].includes(order.status) && order.superfrete_id && (
+                {!swapAllowed && ['awaiting_payment', 'paid'].includes(order.status) && hasLabelGenerated(order) && (
                   <div className="flex justify-end">
-                    <span className="text-[10px] text-zinc-300 flex items-center gap-1">
+                    <span className="text-[10px] text-zinc-400 flex items-center gap-1 bg-zinc-100 px-2 py-0.5 rounded">
                       <ShieldAlert size={9} /> {getSwapBlockedReason(order)}
                     </span>
                   </div>
@@ -1044,13 +1074,13 @@ export default function AdminOrderDetail() {
                         <p className="text-[10px] text-zinc-500 font-medium">Prioridade de cores:</p>
                         <div className="flex flex-wrap gap-1.5">
                           {[
-                            { label: '1ª', color: itemColorPref.color_1 },
-                            { label: '2ª', color: itemColorPref.color_2 },
-                            { label: '3ª', color: itemColorPref.color_3 },
+                            { label: '1a', color: itemColorPref.color_1 },
+                            { label: '2a', color: itemColorPref.color_2 },
+                            { label: '3a', color: itemColorPref.color_3 },
                           ].filter(c => c.color).map((c, i) => (
                             <span key={i} className="inline-flex items-center gap-1 text-[10px] bg-white border border-zinc-200 text-zinc-700 px-1.5 py-0.5 rounded font-medium">
                               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{
-                                backgroundColor: c.color === 'Preta' ? '#1a1a1a' : c.color === 'Branca' ? '#f5f5f5' : c.color === 'Verde' ? '#22c55e' : c.color === 'Laranja' ? '#f97316' : c.color === 'Amarela' ? '#eab308' : c.color === 'Rosa' ? '#ec4899' : c.color === 'Roxa' || c.color === 'Lilás' ? '#a855f7' : c.color === 'Azul' ? '#3b82f6' : c.color === 'Vermelha' ? '#ef4444' : c.color === 'Cinza' ? '#9ca3af' : c.color === 'Marrom' ? '#92400e' : c.color === 'Multicor' ? '#eab308' : '#9ca3af',
+                                backgroundColor: c.color === 'Preta' ? '#1a1a1a' : c.color === 'Branca' ? '#f5f5f5' : c.color === 'Verde' ? '#22c55e' : c.color === 'Laranja' ? '#f97316' : c.color === 'Amarela' ? '#eab308' : c.color === 'Rosa' ? '#ec4899' : c.color === 'Roxa' || c.color === 'Lilas' ? '#a855f7' : c.color === 'Azul' ? '#3b82f6' : c.color === 'Vermelha' ? '#ef4444' : c.color === 'Cinza' ? '#9ca3af' : c.color === 'Marrom' ? '#92400e' : c.color === 'Multicor' ? '#eab308' : '#9ca3af',
                                 border: c.color === 'Branca' ? '1px solid #d4d4d8' : 'none',
                                 ...(c.color === 'Multicor' ? { background: 'linear-gradient(135deg, #ef4444, #eab308, #22c55e, #3b82f6)' } : {}),
                               }} />
@@ -1072,7 +1102,7 @@ export default function AdminOrderDetail() {
         <div className="flex justify-between items-center pt-2 border-t border-zinc-100">
           <span className="text-xs text-zinc-500">Total dos itens</span>
           <span className="font-bold text-sm text-zinc-900">
-            R$ {formatCurrency(order.items?.reduce((s: number, i: any) => s + Number(i.price) * i.quantity, 0) || 0)}
+            R$ {formatCurrency(order.items?.reduce((s: number, i: any) => s + Number(i.price || i.unit_price || 0) * i.quantity, 0) || 0)}
           </span>
         </div>
 
@@ -1090,10 +1120,19 @@ export default function AdminOrderDetail() {
                   <span className="text-emerald-600 font-medium flex-1 truncate">{swap.new_item?.title}</span>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
-                  <span>Produtos: R$ {formatCurrency(swap.subtotal_before || 0)} → R$ {formatCurrency(swap.subtotal_after || 0)}</span>
-                  <span>Frete: R$ {formatCurrency(swap.shipping_before || 0)} → R$ {formatCurrency(swap.shipping_after || 0)}</span>
-                  <span>Total: R$ {formatCurrency(swap.total_before || 0)} → R$ {formatCurrency(swap.total_after || 0)}</span>
+                  <span>Produtos: R$ {formatCurrency(swap.subtotal_before || 0)} &rarr; R$ {formatCurrency(swap.subtotal_after || 0)}</span>
+                  <span>Frete: R$ {formatCurrency(swap.shipping_before || 0)} &rarr; R$ {formatCurrency(swap.shipping_after || 0)}</span>
+                  <span>Total: R$ {formatCurrency(swap.total_before || 0)} &rarr; R$ {formatCurrency(swap.total_after || 0)}</span>
                 </div>
+                {(() => {
+                  const totalDiff = (swap.total_after || 0) - (swap.total_before || 0);
+                  if (totalDiff === 0) return null;
+                  return (
+                    <p className={`text-[10px] font-bold ${totalDiff > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {totalDiff > 0 ? `Cobrar: +R$ ${formatCurrency(totalDiff)}` : `Devolver: R$ ${formatCurrency(Math.abs(totalDiff))}`}
+                    </p>
+                  );
+                })()}
                 <p className="text-[10px] text-zinc-400">{new Date(swap.swapped_at).toLocaleString('pt-BR')}</p>
               </div>
             ))}
@@ -1101,31 +1140,35 @@ export default function AdminOrderDetail() {
         )}
       </div>
 
-      {/* ============ SWAP PRODUCT MODAL ============ */}
+      {/* ============ SWAP PRODUCT MODAL (Professional UX) ============ */}
       {swapItemIndex !== null && order.items?.[swapItemIndex] && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeSwapModal}>
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4" onClick={closeSwapModal}>
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col border border-zinc-200" onClick={e => e.stopPropagation()}>
             {/* Modal Header */}
-            <div className="p-5 border-b border-zinc-100 shrink-0">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-bold text-zinc-900 flex items-center gap-2">
-                  <ArrowRightLeft size={18} className="text-blue-500" />
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 sm:p-5 border-b border-blue-100 shrink-0">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-zinc-900 flex items-center gap-2 text-base">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                    <ArrowRightLeft size={16} className="text-blue-600" />
+                  </div>
                   Trocar Produto
                 </h3>
-                <button onClick={closeSwapModal} className="text-zinc-400 hover:text-zinc-600 text-xl leading-none p-1">&times;</button>
+                <button onClick={closeSwapModal} className="w-8 h-8 rounded-lg bg-white/80 hover:bg-white flex items-center justify-center text-zinc-400 hover:text-zinc-600 transition-colors border border-zinc-200 text-lg leading-none">&times;</button>
               </div>
               
-              {/* Current item */}
-              <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-1">
-                <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Produto Atual (sera removido)</p>
+              {/* Current item being replaced */}
+              <div className="bg-white rounded-xl p-3 border border-red-100 shadow-sm">
+                <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                  <XCircle size={10} /> Produto atual (sera removido)
+                </p>
                 <div className="flex items-center gap-3">
                   {order.items[swapItemIndex].image_url && (
-                    <img src={order.items[swapItemIndex].image_url} alt="" className="w-10 h-10 rounded-lg object-cover border border-red-200" />
+                    <img src={order.items[swapItemIndex].image_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-red-200 shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-900 truncate">{order.items[swapItemIndex].title}</p>
-                    <p className="text-xs text-zinc-500">
-                      {order.items[swapItemIndex].quantity}x · R$ {formatCurrency(Number(order.items[swapItemIndex].price) * order.items[swapItemIndex].quantity)}
+                    <p className="text-sm font-semibold text-zinc-900 line-clamp-2">{order.items[swapItemIndex].title}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      {order.items[swapItemIndex].quantity}x &middot; R$ {fmtPrice(Number(order.items[swapItemIndex].price || order.items[swapItemIndex].unit_price || 0) * order.items[swapItemIndex].quantity)}
                     </p>
                   </div>
                 </div>
@@ -1133,7 +1176,7 @@ export default function AdminOrderDetail() {
             </div>
 
             {/* Search or Confirmation */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
               {!swapConfirming ? (
                 <>
                   {/* Search input */}
@@ -1144,58 +1187,85 @@ export default function AdminOrderDetail() {
                       value={swapSearch}
                       onChange={(e) => handleSwapSearch(e.target.value)}
                       placeholder="Buscar novo produto por nome..."
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-400 outline-none"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-300 outline-none bg-zinc-50 focus:bg-white transition-colors"
                       autoFocus
                     />
                     {swapSearching && (
-                      <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />
+                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />
                     )}
                   </div>
 
                   {/* Search results */}
                   {swapSearch.length >= 2 && !swapSearching && swapSearchResults.length === 0 && (
-                    <p className="text-xs text-zinc-400 text-center py-4">Nenhum produto encontrado para "{swapSearch}"</p>
+                    <div className="text-center py-6 space-y-2">
+                      <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center mx-auto">
+                        <Search size={20} className="text-zinc-300" />
+                      </div>
+                      <p className="text-sm text-zinc-500 font-medium">Nenhum produto encontrado</p>
+                      <p className="text-xs text-zinc-400">Tente buscar com outros termos para &ldquo;{swapSearch}&rdquo;</p>
+                    </div>
                   )}
 
                   {swapSearchResults.length > 0 && (
                     <div className="space-y-1.5">
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-1">
                         {swapSearchResults.length} produto(s) encontrado(s)
                       </p>
-                      {swapSearchResults.map((product) => {
-                        const isCurrentProduct = product.variant_id === order.items[swapItemIndex!].variant_id;
-                        return (
-                          <button
-                            key={product.id}
-                            onClick={() => !isCurrentProduct && selectSwapProduct(product)}
-                            disabled={isCurrentProduct}
-                            className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl border transition-colors ${
-                              isCurrentProduct
-                                ? 'bg-zinc-50 border-zinc-200 opacity-50 cursor-not-allowed'
-                                : 'bg-white border-zinc-100 hover:border-blue-300 hover:bg-blue-50/50'
-                            }`}
-                          >
-                            {product.image_url && (
-                              <img src={product.image_url} alt="" className="w-10 h-10 rounded-lg object-cover border border-zinc-200 shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-zinc-900 truncate">{product.title}</p>
-                              <p className="text-xs text-zinc-500">R$ {formatCurrency(product.price)}</p>
-                            </div>
-                            {isCurrentProduct ? (
-                              <span className="text-[10px] text-zinc-400 shrink-0">Atual</span>
-                            ) : (
-                              <ArrowRight size={14} className="text-blue-400 shrink-0" />
-                            )}
-                          </button>
-                        );
-                      })}
+                      <div className="space-y-1">
+                        {swapSearchResults.map((product) => {
+                          const isCurrentProduct = product.variant_id === order.items[swapItemIndex!].variant_id;
+                          const priceDiff = product.price - Number(order.items[swapItemIndex!].price || order.items[swapItemIndex!].unit_price || 0);
+                          return (
+                            <button
+                              key={product.id}
+                              onClick={() => !isCurrentProduct && selectSwapProduct(product)}
+                              disabled={isCurrentProduct}
+                              className={`w-full text-left flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                                isCurrentProduct
+                                  ? 'bg-zinc-50 border-zinc-200 opacity-50 cursor-not-allowed'
+                                  : 'bg-white border-zinc-100 hover:border-blue-300 hover:bg-blue-50/30 hover:shadow-sm active:scale-[0.99]'
+                              }`}
+                            >
+                              {product.image_url ? (
+                                <img src={product.image_url} alt="" className="w-11 h-11 rounded-lg object-cover border border-zinc-200 shrink-0" />
+                              ) : (
+                                <div className="w-11 h-11 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
+                                  <Package size={16} className="text-zinc-300" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-zinc-900 line-clamp-1">{product.title}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-xs font-semibold text-zinc-700">R$ {fmtPrice(product.price)}</span>
+                                  {!isCurrentProduct && priceDiff !== 0 && (
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                      priceDiff > 0 ? 'text-red-600 bg-red-50' : 'text-emerald-600 bg-emerald-50'
+                                    }`}>
+                                      {priceDiff > 0 ? '+' : '-'}R$ {fmtPrice(Math.abs(priceDiff))}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {isCurrentProduct ? (
+                                <span className="text-[10px] text-zinc-400 bg-zinc-100 px-2 py-0.5 rounded shrink-0 font-medium">Atual</span>
+                              ) : (
+                                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                                  <ArrowRight size={14} className="text-blue-500" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
                   {swapSearch.length < 2 && (
-                    <div className="text-center py-6 space-y-2">
-                      <Search size={24} className="text-zinc-200 mx-auto" />
+                    <div className="text-center py-8 space-y-2">
+                      <div className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mx-auto">
+                        <Search size={24} className="text-blue-300" />
+                      </div>
+                      <p className="text-sm text-zinc-500 font-medium">Busque o novo produto</p>
                       <p className="text-xs text-zinc-400">Digite ao menos 2 caracteres para buscar</p>
                     </div>
                   )}
@@ -1205,111 +1275,165 @@ export default function AdminOrderDetail() {
                 <div className="space-y-4">
                   {/* Swap result message inside modal */}
                   {swapResult && (
-                    <div className={`p-3 rounded-xl border flex items-start gap-2 text-sm ${
+                    <div className={`p-3 rounded-xl border flex items-start gap-2 ${
                       swapResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'
                     }`}>
                       {swapResult.success ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
-                      <p className="flex-1 text-xs">{swapResult.message}</p>
+                      <p className="flex-1 text-xs font-medium">{swapResult.message}</p>
                     </div>
                   )}
 
                   {/* New product card */}
-                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 space-y-1">
-                    <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Novo Produto (sera adicionado)</p>
+                  <div className="bg-white rounded-xl p-3 border border-emerald-200 shadow-sm">
+                    <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                      <CheckCircle2 size={10} /> Novo produto (sera adicionado)
+                    </p>
                     <div className="flex items-center gap-3">
-                      {swapSelectedProduct.image_url && (
-                        <img src={swapSelectedProduct.image_url} alt="" className="w-10 h-10 rounded-lg object-cover border border-emerald-200" />
+                      {swapSelectedProduct.image_url ? (
+                        <img src={swapSelectedProduct.image_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-emerald-200 shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+                          <Package size={16} className="text-emerald-300" />
+                        </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-zinc-900 truncate">{swapSelectedProduct.title}</p>
-                        <p className="text-xs text-zinc-500">
-                          {order.items[swapItemIndex].quantity}x · R$ {formatCurrency(swapSelectedProduct.price * order.items[swapItemIndex].quantity)}
+                        <p className="text-sm font-semibold text-zinc-900 line-clamp-2">{swapSelectedProduct.title}</p>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          {order.items[swapItemIndex].quantity}x &middot; R$ {fmtPrice(swapSelectedProduct.price * order.items[swapItemIndex].quantity)}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Price difference summary */}
+                  {/* ===== DETAILED PRICE COMPARISON ===== */}
                   {(() => {
                     const oldItem = order.items[swapItemIndex];
-                    const oldItemTotal = Number(oldItem.price) * oldItem.quantity;
-                    const newItemTotal = swapSelectedProduct.price * oldItem.quantity;
+                    const qty = oldItem.quantity || 1;
+                    const oldUnitPrice = Number(oldItem.price || oldItem.unit_price || 0);
+                    const newUnitPrice = swapSelectedProduct.price;
+                    const oldItemTotal = oldUnitPrice * qty;
+                    const newItemTotal = newUnitPrice * qty;
                     const priceDiff = newItemTotal - oldItemTotal;
-                    const oldShipping = Number(order.shipping_fee || 0);
-                    const oldOrderTotal = (order.items?.reduce((s: number, i: any) => s + Number(i.price) * i.quantity, 0) || 0) + oldShipping;
-                    const newSubtotal = oldOrderTotal - oldShipping - oldItemTotal + newItemTotal;
-                    // Note: shipping will be recalculated on the backend
+                    
+                    // Current order totals
+                    const currentSubtotal = order.items?.reduce((s: number, i: any) => s + Number(i.price || i.unit_price || 0) * i.quantity, 0) || 0;
+                    const currentShipping = Number(order.shipping_fee || 0);
+                    const currentTotal = Number(order.total_amount || 0);
+                    const isPaid = order.status === 'paid';
+                    
+                    // New subtotal (replace old item price with new)
+                    const newSubtotal = currentSubtotal - oldItemTotal + newItemTotal;
+                    // Note: shipping will be recalculated on backend, so we show estimate
                     
                     return (
-                      <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-4 space-y-3">
-                        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
-                          <Info size={10} /> Resumo da Troca
-                        </p>
-                        
-                        {/* Item comparison */}
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-zinc-500">Produto anterior ({oldItem.quantity}x)</span>
-                            <span className="text-zinc-600">R$ {formatCurrency(oldItemTotal)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-zinc-500">Produto novo ({oldItem.quantity}x)</span>
-                            <span className="text-zinc-600">R$ {formatCurrency(newItemTotal)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs pt-1 border-t border-zinc-200">
-                            <span className="text-zinc-700 font-medium">Diferenca no produto</span>
-                            <span className={`font-bold ${priceDiff > 0 ? 'text-red-600' : priceDiff < 0 ? 'text-emerald-600' : 'text-zinc-600'}`}>
-                              {priceDiff > 0 ? '+' : ''}{priceDiff !== 0 ? `R$ ${formatCurrency(Math.abs(priceDiff))}` : 'Sem diferenca'}
-                              {priceDiff > 0 ? ' (mais caro)' : priceDiff < 0 ? ' (mais barato)' : ''}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Shipping note */}
-                        <div className="bg-amber-50 border border-amber-100 rounded-lg p-2">
-                          <p className="text-[10px] text-amber-700 flex items-center gap-1">
-                            <Truck size={10} />
-                            O frete sera recalculado automaticamente com base no novo produto.
-                          </p>
-                          <p className="text-[10px] text-amber-600 mt-0.5">
-                            Frete atual: R$ {formatCurrency(oldShipping)}
+                      <div className="bg-zinc-50 rounded-xl border border-zinc-200 overflow-hidden">
+                        <div className="p-3 border-b border-zinc-200 bg-zinc-100/50">
+                          <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest flex items-center gap-1.5">
+                            <Info size={10} /> Resumo Financeiro da Troca
                           </p>
                         </div>
+                        <div className="p-3 space-y-2.5">
+                          {/* Item price comparison */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Produto anterior ({qty}x)</span>
+                              <span className="text-zinc-600 font-medium">R$ {fmtPrice(oldItemTotal)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Produto novo ({qty}x)</span>
+                              <span className="text-zinc-600 font-medium">R$ {fmtPrice(newItemTotal)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs pt-1.5 border-t border-zinc-200">
+                              <span className="text-zinc-700 font-semibold">Diferenca no produto</span>
+                              <span className={`font-bold ${priceDiff > 0 ? 'text-red-600' : priceDiff < 0 ? 'text-emerald-600' : 'text-zinc-600'}`}>
+                                {priceDiff > 0 ? '+' : ''}{priceDiff !== 0 ? `R$ ${fmtPrice(Math.abs(priceDiff))}` : 'Sem diferenca'}
+                              </span>
+                            </div>
+                          </div>
 
-                        {/* Subtotal estimate */}
-                        <div className="flex justify-between text-xs pt-1 border-t border-zinc-200">
-                          <span className="text-zinc-700 font-medium">Subtotal estimado (sem frete)</span>
-                          <span className="font-bold text-zinc-900">R$ {formatCurrency(newSubtotal)}</span>
+                          {/* Subtotal comparison */}
+                          <div className="space-y-1 pt-2 border-t border-zinc-200">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Subtotal atual (itens)</span>
+                              <span className="text-zinc-600">R$ {fmtPrice(currentSubtotal)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Subtotal novo (itens)</span>
+                              <span className="text-zinc-700 font-semibold">R$ {fmtPrice(newSubtotal)}</span>
+                            </div>
+                          </div>
+
+                          {/* Shipping note */}
+                          <div className="bg-amber-50/80 border border-amber-100 rounded-lg p-2.5 mt-1">
+                            <div className="flex items-start gap-2">
+                              <Truck size={12} className="text-amber-600 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-[10px] text-amber-700 font-semibold">Frete sera recalculado</p>
+                                <p className="text-[10px] text-amber-600 mt-0.5">
+                                  Frete atual: R$ {formatCurrency(currentShipping)} &middot; O novo frete sera calculado via SuperFrete com base no peso/dimensao do novo produto.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Paid order: show financial impact */}
+                          {isPaid && (
+                            <div className={`rounded-lg p-2.5 border ${
+                              priceDiff > 0 ? 'bg-red-50 border-red-200' : priceDiff < 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-blue-50 border-blue-200'
+                            }`}>
+                              <div className="flex items-start gap-2">
+                                <CreditCard size={12} className={`shrink-0 mt-0.5 ${
+                                  priceDiff > 0 ? 'text-red-500' : priceDiff < 0 ? 'text-emerald-500' : 'text-blue-500'
+                                }`} />
+                                <div>
+                                  <p className={`text-[10px] font-bold ${
+                                    priceDiff > 0 ? 'text-red-700' : priceDiff < 0 ? 'text-emerald-700' : 'text-blue-700'
+                                  }`}>
+                                    {priceDiff > 0 ? 'Cobrar diferenca do cliente' : priceDiff < 0 ? 'Devolver diferenca ao cliente' : 'Sem diferenca de valor'}
+                                  </p>
+                                  <p className={`text-[10px] mt-0.5 ${
+                                    priceDiff > 0 ? 'text-red-600' : priceDiff < 0 ? 'text-emerald-600' : 'text-blue-600'
+                                  }`}>
+                                    {priceDiff !== 0 
+                                      ? `Diferenca estimada nos produtos: R$ ${fmtPrice(Math.abs(priceDiff))}. O frete pode alterar o valor final.`
+                                      : 'O valor dos produtos e o mesmo. Apenas o frete pode mudar.'
+                                    }
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
                   })()}
 
                   {/* Warning */}
-                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-left text-xs text-amber-700">
-                    <p className="font-bold flex items-center gap-1 mb-1"><AlertTriangle size={12} /> Atencao</p>
-                    <ul className="space-y-0.5 ml-1">
-                      <li>O pedido inteiro sera recalculado</li>
-                      <li>O frete sera recalculado via SuperFrete</li>
-                      <li>Esta acao sera registrada no historico</li>
-                      <li>O produto anterior sera removido do pedido</li>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-xs text-zinc-600">
+                    <p className="font-bold flex items-center gap-1 mb-1.5 text-zinc-700"><AlertTriangle size={12} className="text-amber-500" /> O que vai acontecer:</p>
+                    <ul className="space-y-0.5 ml-0.5 text-zinc-500">
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O produto anterior sera removido do pedido</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O novo produto sera adicionado no lugar</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O frete sera recalculado via SuperFrete</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O total do pedido sera atualizado</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> A troca sera registrada no historico</li>
                     </ul>
                   </div>
 
                   {/* Action buttons */}
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-2 pt-1">
                     <button
                       onClick={executeSwap}
                       disabled={swapExecuting || !!swapResult?.success}
-                      className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+                      className="w-full bg-blue-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors shadow-sm active:scale-[0.98]"
                     >
-                      {swapExecuting ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
-                      {swapExecuting ? 'Trocando produto...' : 'Confirmar Troca'}
+                      {swapExecuting ? <Loader2 size={16} className="animate-spin" /> : <ArrowRightLeft size={16} />}
+                      {swapExecuting ? 'Processando troca...' : 'Confirmar Troca de Produto'}
                     </button>
                     <button
                       onClick={() => { setSwapConfirming(false); setSwapSelectedProduct(null); setSwapResult(null); }}
                       disabled={swapExecuting}
-                      className="w-full text-zinc-500 py-2 rounded-xl text-sm font-medium hover:bg-zinc-50 border border-zinc-200 disabled:opacity-50"
+                      className="w-full text-zinc-500 py-2.5 rounded-xl text-sm font-medium hover:bg-zinc-50 border border-zinc-200 disabled:opacity-50 transition-colors"
                     >
                       Voltar para busca
                     </button>
