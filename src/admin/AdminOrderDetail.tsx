@@ -1557,7 +1557,7 @@ export default function AdminOrderDetail() {
             <Truck size={14} className="text-blue-500" />
             <span className="text-zinc-600">Rastreio:</span>
             <a
-              href={`https://www.linkcorreios.com.br/?id=${order.tracking_code}`}
+              href={`https://rastreamento.correios.com.br/app/index.php?objeto=${order.tracking_code}`}
               target="_blank"
               rel="noopener noreferrer"
               className="font-mono font-bold text-blue-600 underline"
@@ -1824,7 +1824,7 @@ export default function AdminOrderDetail() {
           <div className="space-y-3">
             <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl text-sm text-blue-600 flex items-center gap-2">
               <Truck size={14} />
-              <span>Rastreio: <a href={`https://www.linkcorreios.com.br/?id=${order.tracking_code}`} target="_blank" rel="noopener noreferrer" className="font-mono font-bold underline">{order.tracking_code}</a></span>
+              <span>Rastreio: <a href={`https://rastreamento.correios.com.br/app/index.php?objeto=${order.tracking_code}`} target="_blank" rel="noopener noreferrer" className="font-mono font-bold underline">{order.tracking_code}</a></span>
             </div>
             <button
               onClick={() => setConfirmAction({

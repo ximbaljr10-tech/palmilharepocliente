@@ -371,7 +371,7 @@ function OrderCard({ order, updating, onUpdateStatus, onGenerateLabel, isArchive
                   <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-blue-600 text-sm">
                       <Truck size={14} />
-                      <span>Rastreio: <a href={`https://www.linkcorreios.com.br/?id=${order.tracking_code}`} target="_blank" rel="noopener noreferrer" className="font-mono font-bold underline">{order.tracking_code}</a></span>
+                      <span>Rastreio: <a href={`https://rastreamento.correios.com.br/app/index.php?objeto=${order.tracking_code}`} target="_blank" rel="noopener noreferrer" className="font-mono font-bold underline">{order.tracking_code}</a></span>
                     </div>
                     <button onClick={() => onUpdateStatus('delivered')} disabled={updating}
                       className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-green-700 disabled:opacity-50 transition-colors w-full sm:w-auto text-center">

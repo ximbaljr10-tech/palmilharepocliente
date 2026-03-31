@@ -227,7 +227,7 @@ function TrackOrderCard({ order, defaultOpen }: { order: any; defaultOpen: boole
                     <p className="font-mono font-bold text-blue-800 text-sm sm:text-lg truncate">{order.tracking_code}</p>
                   </div>
                   <a
-                    href={`https://www.linkcorreios.com.br/?id=${order.tracking_code}`}
+                    href={`https://rastreamento.correios.com.br/app/index.php?objeto=${order.tracking_code}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded-lg transition-all shrink-0"
