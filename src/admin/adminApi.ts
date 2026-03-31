@@ -462,7 +462,7 @@ export interface SwapItemPayload {
   new_product_id: string;
   new_variant_id: string;
   new_product_title: string;
-  new_product_price: number; // in REAIS (same as Medusa unit_price in this system)
+  new_product_price: number; // in REAIS
   new_product_image: string;
   new_product_shipping: {
     height: number;
@@ -490,6 +490,27 @@ export async function swapOrderItem(payload: SwapItemPayload): Promise<{
     return result;
   } catch (err: any) {
     console.error('Erro ao trocar produto:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+// Resolve (consolidate) a pending swap adjustment
+export async function resolveSwapAdjustment(orderId: number, medusa_order_id: string): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    const result = await adminFetch('/admin/pedidos', {
+      method: 'PUT',
+      body: JSON.stringify({
+        orderId,
+        medusa_order_id,
+        action: 'resolve_swap_adjustment',
+      }),
+    });
+    return result;
+  } catch (err: any) {
+    console.error('Erro ao resolver ajuste:', err);
     return { success: false, error: err.message };
   }
 }

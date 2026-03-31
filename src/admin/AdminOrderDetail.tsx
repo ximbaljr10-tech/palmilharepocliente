@@ -6,7 +6,7 @@ import {
   Archive, ArchiveRestore, AlertTriangle, Mail, Printer, RefreshCw, Wallet, Zap,
   StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History
 } from 'lucide-react';
-import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, getShippingByYards, extractYards } from './adminApi';
+import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards } from './adminApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -1106,11 +1106,118 @@ export default function AdminOrderDetail() {
           </span>
         </div>
 
-        {/* Swap History */}
-        {order.swapped_items && order.swapped_items.length > 0 && (
+        {/* ===== SWAP ADJUSTMENT (Pending or Resolved) ===== */}
+        {order.swap_adjustment && order.swap_adjustment.status === 'pending' && order.swap_adjustment.original_state && order.swap_adjustment.current_state && (
+          <div className="pt-2 border-t border-amber-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest flex items-center gap-1.5">
+                <AlertTriangle size={10} /> Ajuste de Troca Pendente
+              </p>
+              <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">
+                {order.swap_adjustment.swap_count} troca{order.swap_adjustment.swap_count > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3 space-y-2.5">
+              {/* Original vs Current items */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[9px] font-bold text-zinc-400 uppercase mb-1">Original</p>
+                  {order.swap_adjustment.original_state.items?.map((it: any, i: number) => (
+                    <p key={i} className="text-[10px] text-zinc-500 truncate">{it.title} ({it.quantity}x R$ {formatCurrency(it.unit_price || 0)})</p>
+                  ))}
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold text-emerald-500 uppercase mb-1">Atual</p>
+                  {order.swap_adjustment.current_state.items?.map((it: any, i: number) => (
+                    <p key={i} className="text-[10px] text-zinc-700 font-medium truncate">{it.title} ({it.quantity}x R$ {formatCurrency(it.unit_price || 0)})</p>
+                  ))}
+                </div>
+              </div>
+              {/* Financial summary: original vs current */}
+              <div className="border-t border-amber-200 pt-2 space-y-1">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-zinc-500">Subtotal</span>
+                  <span>
+                    <span className="text-zinc-400 line-through mr-2">R$ {formatCurrency(order.swap_adjustment.original_state.subtotal || 0)}</span>
+                    <span className="text-zinc-700 font-semibold">R$ {formatCurrency(order.swap_adjustment.current_state.subtotal || 0)}</span>
+                  </span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-zinc-500">Frete</span>
+                  <span>
+                    <span className="text-zinc-400 line-through mr-2">R$ {formatCurrency(order.swap_adjustment.original_state.shipping_fee || 0)}</span>
+                    <span className="text-zinc-700 font-semibold">R$ {formatCurrency(order.swap_adjustment.current_state.shipping_fee || 0)}</span>
+                  </span>
+                </div>
+                <div className="flex justify-between text-[10px] pt-1 border-t border-amber-100">
+                  <span className="text-zinc-700 font-bold">Total</span>
+                  <span>
+                    <span className="text-zinc-400 line-through mr-2">R$ {formatCurrency(order.swap_adjustment.original_state.total || 0)}</span>
+                    <span className="text-zinc-900 font-bold">R$ {formatCurrency(order.swap_adjustment.current_state.total || 0)}</span>
+                  </span>
+                </div>
+                {/* Difference */}
+                {(() => {
+                  const diff = (order.swap_adjustment.current_state.total || 0) - (order.swap_adjustment.original_state.total || 0);
+                  if (Math.abs(diff) < 0.01) return <p className="text-[10px] text-blue-600 font-semibold text-center pt-1">Sem diferenca de valor</p>;
+                  return (
+                    <p className={`text-[10px] font-bold text-center pt-1 ${diff > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {diff > 0 ? `Cobrar do cliente: +R$ ${formatCurrency(diff)}` : `Devolver ao cliente: R$ ${formatCurrency(Math.abs(diff))}`}
+                    </p>
+                  );
+                })()}
+              </div>
+              {/* Resolve button */}
+              <button
+                onClick={async () => {
+                  if (!confirm('Marcar este ajuste como resolvido? Isso consolida o historico.')) return;
+                  const result = await resolveSwapAdjustment(order.id, order.medusa_order_id);
+                  if (result.success) loadOrder();
+                }}
+                className="w-full text-[10px] bg-emerald-600 text-white py-2 rounded-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <CheckCircle2 size={10} /> Marcar Ajuste como Resolvido
+              </button>
+              <p className="text-[9px] text-zinc-400 text-center">Enquanto pendente, voce pode continuar trocando produtos.</p>
+            </div>
+          </div>
+        )}
+
+        {/* ===== CONSOLIDATED SWAP HISTORY (resolved cycles only) ===== */}
+        {order.swap_history && order.swap_history.length > 0 && (
           <div className="pt-2 border-t border-zinc-100 space-y-2">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
-              <History size={10} /> Historico de Trocas ({order.swapped_items.length})
+              <History size={10} /> Historico de Trocas ({order.swap_history.length})
+            </p>
+            {order.swap_history.map((entry: any, sIdx: number) => (
+              <div key={sIdx} className="bg-zinc-50 border border-zinc-200 rounded-lg p-2.5 space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                  <span>Ciclo #{sIdx + 1} &middot; {entry.swap_count} troca{entry.swap_count > 1 ? 's' : ''}</span>
+                  <span>{new Date(entry.resolved_at).toLocaleString('pt-BR')}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-zinc-500">Total original &rarr; final</span>
+                  <span>R$ {formatCurrency(entry.original_state?.total || 0)} &rarr; R$ {formatCurrency(entry.final_state?.total || 0)}</span>
+                </div>
+                {(() => {
+                  const diff = (entry.final_state?.total || 0) - (entry.original_state?.total || 0);
+                  if (Math.abs(diff) < 0.01) return null;
+                  return (
+                    <p className={`text-[10px] font-bold ${diff > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {diff > 0 ? `Cobrado: +R$ ${formatCurrency(diff)}` : `Devolvido: R$ ${formatCurrency(Math.abs(diff))}`}
+                    </p>
+                  );
+                })()}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ===== LEGACY SWAP HISTORY (old swapped_items, only show if no new adjustment exists) ===== */}
+        {!order.swap_adjustment && order.swapped_items && order.swapped_items.length > 0 && (
+          <div className="pt-2 border-t border-zinc-100 space-y-2">
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+              <History size={10} /> Historico de Trocas (legado)
             </p>
             {order.swapped_items.map((swap: any, sIdx: number) => (
               <div key={sIdx} className="bg-blue-50/50 border border-blue-100 rounded-lg p-2.5 space-y-1">
@@ -1119,20 +1226,6 @@ export default function AdminOrderDetail() {
                   <ArrowRight size={12} className="text-blue-400 shrink-0" />
                   <span className="text-emerald-600 font-medium flex-1 truncate">{swap.new_item?.title}</span>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-zinc-500">
-                  <span>Produtos: R$ {formatCurrency(swap.subtotal_before || 0)} &rarr; R$ {formatCurrency(swap.subtotal_after || 0)}</span>
-                  <span>Frete: R$ {formatCurrency(swap.shipping_before || 0)} &rarr; R$ {formatCurrency(swap.shipping_after || 0)}</span>
-                  <span>Total: R$ {formatCurrency(swap.total_before || 0)} &rarr; R$ {formatCurrency(swap.total_after || 0)}</span>
-                </div>
-                {(() => {
-                  const totalDiff = (swap.total_after || 0) - (swap.total_before || 0);
-                  if (totalDiff === 0) return null;
-                  return (
-                    <p className={`text-[10px] font-bold ${totalDiff > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                      {totalDiff > 0 ? `Cobrar: +R$ ${formatCurrency(totalDiff)}` : `Devolver: R$ ${formatCurrency(Math.abs(totalDiff))}`}
-                    </p>
-                  );
-                })()}
                 <p className="text-[10px] text-zinc-400">{new Date(swap.swapped_at).toLocaleString('pt-BR')}</p>
               </div>
             ))}
