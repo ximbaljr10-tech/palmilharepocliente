@@ -1,6 +1,53 @@
 // ============ ADMIN API UTILITIES ============
 // Shared across all admin pages
 
+// ============ AUDIT: SESSION + OPERATOR IDENTIFICATION ============
+// Every admin session gets a unique session_id.
+// The operator (actor_label) is chosen by the user on first access.
+// Both are sent as headers on every admin API call for audit trail.
+
+function getOrCreateSessionId(): string {
+  let sid = sessionStorage.getItem('admin_session_id');
+  if (!sid) {
+    sid = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    sessionStorage.setItem('admin_session_id', sid);
+  }
+  return sid;
+}
+
+export function getSessionId(): string {
+  return getOrCreateSessionId();
+}
+
+export function getActorLabel(): string | null {
+  return localStorage.getItem('admin_actor_label');
+}
+
+export function setActorLabel(label: string): void {
+  localStorage.setItem('admin_actor_label', label);
+}
+
+export function clearActorLabel(): void {
+  localStorage.removeItem('admin_actor_label');
+}
+
+export function needsActorLabel(): boolean {
+  return !localStorage.getItem('admin_actor_label');
+}
+
+// Build audit headers for every admin API call
+function getAuditHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  headers['X-Audit-Session-Id'] = getOrCreateSessionId();
+  headers['X-Audit-Origin'] = 'admin_panel';
+  headers['X-Audit-Actor-Type'] = 'admin';
+  const label = getActorLabel();
+  if (label) {
+    headers['X-Audit-Actor-Label'] = label;
+  }
+  return headers;
+}
+
 export const MEDUSA_URL = (() => {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
@@ -28,6 +75,7 @@ export async function adminFetch(path: string, options: RequestInit = {}) {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
+      ...getAuditHeaders(),
       ...(options.headers as Record<string, string> || {}),
     },
   });

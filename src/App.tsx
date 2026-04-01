@@ -25,6 +25,7 @@ import AdminProducts from './admin/AdminProducts';
 import AdminArchived from './admin/AdminArchived';
 import AdminSoldItems from './admin/AdminSoldItems';
 import AdminEmailInbox from './admin/AdminEmailInbox';
+import AdminAuditoria from './admin/AdminAuditoria';
 
 // Smart scroll management:
 // - New top-level page navigation → scroll to top
@@ -300,6 +301,7 @@ export default function App() {
             <Route path="email" element={<AdminEmailInbox />} />
             <Route path="itens-vendidos" element={<AdminSoldItems />} />
             <Route path="arquivados" element={<AdminArchived />} />
+            <Route path="historico" element={<AdminAuditoria />} />
           </Route>
 
           {/* Store routes - all under /store */}

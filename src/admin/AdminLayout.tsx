@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
-import { Menu, X, LayoutDashboard, Package, ShoppingBag, Archive, LogOut, BarChart3, Mail } from 'lucide-react';
-import { MEDUSA_URL, logout } from './adminApi';
+import { Menu, X, LayoutDashboard, Package, ShoppingBag, Archive, LogOut, BarChart3, Mail, ClipboardList, User } from 'lucide-react';
+import { MEDUSA_URL, logout, needsActorLabel, setActorLabel, getActorLabel, clearActorLabel } from './adminApi';
 import AdminLogin from './AdminLogin';
 
 const NAV_ITEMS = [
@@ -11,7 +11,42 @@ const NAV_ITEMS = [
   { path: '/store/admin/email', label: 'Email', icon: Mail },
   { path: '/store/admin/itens-vendidos', label: 'Itens Vendidos', icon: BarChart3 },
   { path: '/store/admin/arquivados', label: 'Arquivados', icon: Archive },
+  { path: '/store/admin/historico', label: 'Historico', icon: ClipboardList },
 ];
+
+// Fixed operator options
+const OPERATOR_OPTIONS = ['Luana', 'Programador', 'Auditoria'];
+
+// Operator selection modal — shown once per session when actor_label is not set
+function OperatorSelectModal({ onSelect }: { onSelect: (label: string) => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-5 shadow-2xl border border-zinc-200">
+        <div className="text-center space-y-2">
+          <div className="w-14 h-14 mx-auto bg-zinc-100 rounded-full flex items-center justify-center">
+            <User size={28} className="text-zinc-600" />
+          </div>
+          <h3 className="font-bold text-zinc-900 text-lg">Quem esta operando agora?</h3>
+          <p className="text-sm text-zinc-500">Selecione seu perfil para continuar</p>
+        </div>
+        <div className="space-y-2">
+          {OPERATOR_OPTIONS.map((label) => (
+            <button
+              key={label}
+              onClick={() => onSelect(label)}
+              className="w-full text-left px-4 py-3.5 rounded-xl border border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50 active:bg-zinc-100 transition-all text-sm font-semibold text-zinc-800 flex items-center gap-3"
+            >
+              <div className="w-9 h-9 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-500 font-bold text-sm">
+                {label.charAt(0)}
+              </div>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Admin scroll restoration: saves/restores scroll positions per admin route
 function AdminScrollManager() {
@@ -43,6 +78,8 @@ export default function AdminLayout() {
   const [authenticated, setAuthenticated] = useState(false);
   const [checking, setChecking] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showOperatorSelect, setShowOperatorSelect] = useState(false);
+  const [currentOperator, setCurrentOperator] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -54,8 +91,17 @@ export default function AdminLayout() {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       })
         .then(res => {
-          if (res.ok) setAuthenticated(true);
-          else { localStorage.removeItem('admin_token'); }
+          if (res.ok) {
+            setAuthenticated(true);
+            // Check if operator identification is needed
+            if (needsActorLabel()) {
+              setShowOperatorSelect(true);
+            } else {
+              setCurrentOperator(getActorLabel());
+            }
+          } else {
+            localStorage.removeItem('admin_token');
+          }
         })
         .catch(() => { localStorage.removeItem('admin_token'); })
         .finally(() => setChecking(false));
@@ -63,6 +109,23 @@ export default function AdminLayout() {
       setChecking(false);
     }
   }, []);
+
+  // Handle operator selection
+  const handleOperatorSelect = (label: string) => {
+    setActorLabel(label);
+    setCurrentOperator(label);
+    setShowOperatorSelect(false);
+  };
+
+  // Handle login success — check for actor_label
+  const handleLoginSuccess = () => {
+    setAuthenticated(true);
+    if (needsActorLabel()) {
+      setShowOperatorSelect(true);
+    } else {
+      setCurrentOperator(getActorLabel());
+    }
+  };
 
   // Close menu on click outside
   useEffect(() => {
@@ -104,13 +167,16 @@ export default function AdminLayout() {
   }
 
   if (!authenticated) {
-    return <AdminLogin onLogin={() => setAuthenticated(true)} />;
+    return <AdminLogin onLogin={handleLoginSuccess} />;
   }
 
   const currentPath = location.pathname;
 
   return (
     <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900">
+      {/* Operator Selection Modal */}
+      {showOperatorSelect && <OperatorSelectModal onSelect={handleOperatorSelect} />}
+
       {/* Header */}
       <header className="bg-white border-b border-zinc-100 sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -182,6 +248,20 @@ export default function AdminLayout() {
               </h1>
             </div>
           </div>
+
+          {/* Current operator indicator */}
+          {currentOperator && (
+            <button
+              onClick={() => setShowOperatorSelect(true)}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-700 bg-zinc-50 hover:bg-zinc-100 px-2.5 py-1.5 rounded-lg transition-colors border border-zinc-200"
+              title="Trocar operador"
+            >
+              <div className="w-5 h-5 rounded-full bg-zinc-200 flex items-center justify-center text-[10px] font-bold text-zinc-600">
+                {currentOperator.charAt(0)}
+              </div>
+              <span className="hidden sm:inline font-medium">{currentOperator}</span>
+            </button>
+          )}
         </div>
       </header>
 

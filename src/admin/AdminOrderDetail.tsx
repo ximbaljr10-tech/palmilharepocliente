@@ -53,6 +53,11 @@ export default function AdminOrderDetail() {
   });
   const [cpfError, setCpfError] = useState('');
 
+  // Timeline (audit trail) state
+  const [timelineLogs, setTimelineLogs] = useState<any[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
+
   // Confirmation modal state for single-order actions
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -72,8 +77,24 @@ export default function AdminOrderDetail() {
   };
 
   useEffect(() => {
-    if (id) loadOrder();
+    if (id) {
+      loadOrder();
+      loadTimeline();
+    }
   }, [id]);
+
+  const loadTimeline = async () => {
+    if (!id) return;
+    setTimelineLoading(true);
+    try {
+      const data = await adminFetch(`/admin/auditoria?order_id=${id}`);
+      setTimelineLogs(data.logs || []);
+    } catch (err) {
+      console.error('Erro ao carregar timeline:', err);
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
 
   const loadOrder = async () => {
     setLoading(true);
@@ -1662,6 +1683,137 @@ export default function AdminOrderDetail() {
           )}
         </div>
         <p className="text-[10px] text-zinc-300 italic">Visivel apenas para administradores. Nao aparece para o cliente.</p>
+      </div>
+
+      {/* ============ TIMELINE / AUDIT TRAIL ============ */}
+      <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+            <History size={11} /> Historico de Acoes
+          </p>
+          <div className="flex items-center gap-2">
+            {timelineLogs.length > 0 && (
+              <span className="text-[10px] bg-zinc-100 text-zinc-500 px-2 py-0.5 rounded-full font-medium">
+                {timelineLogs.length} registro{timelineLogs.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            <button
+              onClick={loadTimeline}
+              disabled={timelineLoading}
+              className="text-zinc-400 hover:text-zinc-600 p-1 rounded-lg hover:bg-zinc-50 transition-colors disabled:opacity-50"
+              title="Atualizar historico"
+            >
+              <RefreshCw size={12} className={timelineLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        </div>
+
+        {timelineLoading && timelineLogs.length === 0 && (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 size={18} className="animate-spin text-zinc-300" />
+          </div>
+        )}
+
+        {!timelineLoading && timelineLogs.length === 0 && (
+          <div className="text-center py-4">
+            <p className="text-xs text-zinc-400">Nenhuma acao registrada para este pedido ainda.</p>
+            <p className="text-[10px] text-zinc-300 mt-0.5">As acoes serao registradas automaticamente a partir de agora.</p>
+          </div>
+        )}
+
+        {timelineLogs.length > 0 && (
+          <div className="space-y-0">
+            {(timelineExpanded ? timelineLogs : timelineLogs.slice(0, 5)).map((log: any, idx: number) => {
+              const isError = log.result === 'error';
+              const isBatch = !!log.batch_id;
+              const actorDisplay = log.actor_label || (log.actor_type === 'webhook' ? 'SuperFrete' : log.actor_type === 'system' ? 'Sistema' : 'Operador');
+              const isLast = idx === (timelineExpanded ? timelineLogs.length - 1 : Math.min(timelineLogs.length - 1, 4));
+              
+              // Action label mapping
+              const actionLabels: Record<string, string> = {
+                'status_change': 'Mudanca de Status',
+                'batch_mark_paid': 'Marcar Pago (lote)',
+                'batch_mark_paid_label': 'Pago + Etiqueta (lote)',
+                'batch_pay_labels': 'Pagar Etiquetas (lote)',
+                'batch_revert_to_paid': 'Reverter para Pago (lote)',
+                'batch_finalize_and_label': 'Finalizar + Etiqueta (lote)',
+                'batch_sync_superfrete': 'Sincronizar SuperFrete (lote)',
+                'generate_label': 'Gerar Etiqueta',
+                'finalize_and_label': 'Finalizar + Etiqueta',
+                'sync_superfrete': 'Sincronizar SuperFrete',
+                'save_observation': 'Salvar Observacao',
+                'update_customer_data': 'Atualizar Dados Cliente',
+                'archive': 'Arquivar',
+                'unarchive': 'Desarquivar',
+                'swap_item': 'Trocar Produto',
+                'resolve_swap_adjustment': 'Resolver Ajuste de Troca',
+                'tracking_update': 'Atualizar Rastreio',
+                'webhook_superfrete': 'Atualizacao SuperFrete',
+              };
+              const actionLabel = actionLabels[log.action_type] || log.action_type.replace(/_/g, ' ');
+              
+              const statusLabels: Record<string, string> = {
+                'awaiting_payment': 'Aguardando Pagamento',
+                'paid': 'Pago',
+                'preparing': 'Preparando',
+                'shipped': 'Enviado',
+                'delivered': 'Entregue',
+                'cancelled': 'Cancelado',
+              };
+
+              return (
+                <div key={log.id} className="flex gap-3">
+                  {/* Timeline line + dot */}
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className={`w-2.5 h-2.5 rounded-full mt-1 ${isError ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                    {!isLast && <div className="w-px flex-1 bg-zinc-200 mt-1" />}
+                  </div>
+                  {/* Content */}
+                  <div className={`flex-1 pb-3 ${isLast ? '' : 'border-b-0'}`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-zinc-800">{actionLabel}</span>
+                      {isBatch && (
+                        <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">Lote</span>
+                      )}
+                      {isError && (
+                        <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Erro</span>
+                      )}
+                    </div>
+                    {log.previous_status && log.new_status && log.previous_status !== log.new_status && (
+                      <p className="text-[10px] text-zinc-500 mt-0.5">
+                        {statusLabels[log.previous_status] || log.previous_status} → {statusLabels[log.new_status] || log.new_status}
+                      </p>
+                    )}
+                    {isError && log.error_message && (
+                      <p className="text-[10px] text-red-500 mt-0.5 line-clamp-1">{log.error_message}</p>
+                    )}
+                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-zinc-400">
+                      <span>{new Date(log.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                      <span>&middot;</span>
+                      <span>{actorDisplay}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {timelineLogs.length > 5 && !timelineExpanded && (
+              <button
+                onClick={() => setTimelineExpanded(true)}
+                className="w-full text-center text-xs text-zinc-500 hover:text-zinc-700 py-2 hover:bg-zinc-50 rounded-lg transition-colors font-medium"
+              >
+                Ver todos os {timelineLogs.length} registros
+              </button>
+            )}
+            {timelineExpanded && timelineLogs.length > 5 && (
+              <button
+                onClick={() => setTimelineExpanded(false)}
+                className="w-full text-center text-xs text-zinc-500 hover:text-zinc-700 py-2 hover:bg-zinc-50 rounded-lg transition-colors font-medium"
+              >
+                Mostrar menos
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ============ ACTIONS ============ */}
