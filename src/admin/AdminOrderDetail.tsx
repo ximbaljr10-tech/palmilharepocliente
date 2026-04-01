@@ -4,11 +4,181 @@ import {
   ArrowLeft, User, MapPin, Package, Truck, CreditCard, Tag, ExternalLink,
   MessageCircle, Copy, Clock, BoxIcon, CheckCircle2, XCircle, Loader2,
   Archive, ArchiveRestore, AlertTriangle, Mail, Printer, RefreshCw, Wallet, Zap,
-  StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History
+  StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards } from './adminApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+// ============ USER-AGENT PARSING (for timeline device info) ============
+function parseUA(ua: string | null | undefined): { os: string; browser: string; type: string; brand?: string; summary: string } | null {
+  if (!ua) return null;
+  const u = ua.toLowerCase();
+  if (u.includes('superfrete') || u.includes('webhook')) return { os: 'Servidor', browser: 'SuperFrete', type: 'bot', summary: 'SuperFrete' };
+  if (u.includes('bot') || u.includes('crawler')) return { os: 'Servidor', browser: 'Bot', type: 'bot', summary: 'Bot' };
+  let os = '?', browser = '?', type = 'desktop', brand;
+  if (u.includes('iphone')) { os = 'iOS'; type = 'mobile'; brand = 'iPhone'; }
+  else if (u.includes('ipad')) { os = 'iPadOS'; type = 'tablet'; brand = 'iPad'; }
+  else if (u.includes('android')) {
+    os = 'Android'; type = 'mobile';
+    const m = ua.match(/;\s*([^;)]+)\s*Build/); if (m) brand = m[1].trim();
+  }
+  else if (u.includes('macintosh') || u.includes('mac os')) { os = 'macOS'; brand = 'Mac'; }
+  else if (u.includes('windows')) os = 'Windows';
+  else if (u.includes('linux')) os = 'Linux';
+  if (u.includes('edg/')) browser = 'Edge';
+  else if (u.includes('opr/') || u.includes('opera')) browser = 'Opera';
+  else if (u.includes('chrome') && !u.includes('chromium')) browser = 'Chrome';
+  else if (u.includes('firefox')) browser = 'Firefox';
+  else if (u.includes('safari') && !u.includes('chrome')) browser = 'Safari';
+  else if (u.includes('samsung')) browser = 'Samsung';
+  const parts = [brand || os !== '?' ? (brand || os) : null, browser !== '?' ? browser : null, type === 'mobile' ? 'Mobile' : type === 'tablet' ? 'Tablet' : null].filter(Boolean);
+  return { os, browser, type, brand, summary: parts.join(' / ') || 'Desconhecido' };
+}
+
+const TL_ACTION_LABELS: Record<string, string> = {
+  'status_change': 'Mudanca de Status',
+  'batch_mark_paid': 'Marcar Pago (lote)',
+  'batch_mark_paid_label': 'Pago + Etiqueta (lote)',
+  'batch_pay_labels': 'Pagar Etiquetas (lote)',
+  'batch_revert_to_paid': 'Reverter para Pago (lote)',
+  'batch_finalize_and_label': 'Finalizar + Etiqueta (lote)',
+  'batch_sync_superfrete': 'Sincronizar SuperFrete (lote)',
+  'generate_label': 'Gerar Etiqueta',
+  'finalize_and_label': 'Finalizar + Etiqueta',
+  'sync_superfrete': 'Sincronizar SuperFrete',
+  'save_observation': 'Salvar Observacao',
+  'update_customer_data': 'Atualizar Dados Cliente',
+  'archive': 'Arquivar',
+  'unarchive': 'Desarquivar',
+  'swap_item': 'Trocar Produto',
+  'resolve_swap_adjustment': 'Resolver Ajuste de Troca',
+  'tracking_update': 'Atualizar Rastreio',
+  'webhook_superfrete': 'Atualizacao SuperFrete',
+};
+const TL_STATUS_LABELS: Record<string, string> = {
+  'awaiting_payment': 'Aguardando Pagamento', 'paid': 'Pago', 'preparing': 'Preparando',
+  'shipped': 'Enviado', 'delivered': 'Entregue', 'cancelled': 'Cancelado',
+};
+
+// ============ TIMELINE ITEM (EXPANDABLE ACCORDION) ============
+function TimelineItem({ log }: { log: any }) {
+  const [open, setOpen] = React.useState(false);
+  const isError = log.result === 'error';
+  const isBatch = !!log.batch_id;
+  const actorDisplay = log.actor_label || (log.actor_type === 'webhook' ? 'SuperFrete' : log.actor_type === 'system' ? 'Sistema' : 'Operador');
+  const device = parseUA(log.user_agent);
+  const actionLabel = TL_ACTION_LABELS[log.action_type] || log.action_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+  return (
+    <div className={`border rounded-lg overflow-hidden transition-colors ${isError ? 'border-red-200 bg-red-50/30' : 'border-zinc-100 bg-white'}`}>
+      {/* Collapsed header */}
+      <button onClick={() => setOpen(!open)} className="w-full text-left px-2.5 py-2 flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full shrink-0 ${isError ? 'bg-red-400' : 'bg-emerald-400'}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-semibold text-zinc-800">{actionLabel}</span>
+            {isBatch && <span className="text-[9px] bg-purple-100 text-purple-700 px-1 py-0.5 rounded font-medium">Lote</span>}
+            {isError && <span className="text-[9px] bg-red-100 text-red-600 px-1 py-0.5 rounded font-medium">Erro</span>}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-zinc-400 flex-wrap">
+            <span>{new Date(log.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+            <span>&middot;</span>
+            <span>{actorDisplay}</span>
+            {log.previous_status && log.new_status && log.previous_status !== log.new_status && (
+              <>
+                <span>&middot;</span>
+                <span>{TL_STATUS_LABELS[log.previous_status] || log.previous_status} &rarr; {TL_STATUS_LABELS[log.new_status] || log.new_status}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0 text-zinc-300">
+          {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </div>
+      </button>
+
+      {/* Expanded details */}
+      {open && (
+        <div className="px-2.5 pb-2.5 border-t border-zinc-100 pt-2 space-y-1.5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+            <div>
+              <span className="text-zinc-400">Horario:</span>{' '}
+              <span className="text-zinc-700 font-medium">{new Date(log.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+            </div>
+            <div>
+              <span className="text-zinc-400">Operador:</span>{' '}
+              <span className="text-zinc-700 font-medium">{actorDisplay}</span>
+            </div>
+            {log.previous_status && (
+              <div><span className="text-zinc-400">Status anterior:</span> <span className="text-zinc-700">{TL_STATUS_LABELS[log.previous_status] || log.previous_status}</span></div>
+            )}
+            {log.new_status && (
+              <div><span className="text-zinc-400">Novo status:</span> <span className="text-zinc-700">{TL_STATUS_LABELS[log.new_status] || log.new_status}</span></div>
+            )}
+            {log.origin && (
+              <div><span className="text-zinc-400">Origem:</span> <span className="text-zinc-700">{log.origin === 'admin_panel' ? 'Painel Admin' : log.origin === 'webhook' ? 'Webhook' : log.origin}</span></div>
+            )}
+          </div>
+
+          {/* Device/IP info */}
+          {(log.ip_address || device) && (
+            <div className="bg-zinc-50 rounded-md p-2 space-y-0.5">
+              <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Acesso</p>
+              {log.ip_address && (
+                <p className="text-[10px] text-zinc-600"><span className="text-zinc-400">IP:</span> <span className="font-mono">{log.ip_address}</span></p>
+              )}
+              {device && (
+                <p className="text-[10px] text-zinc-600"><span className="text-zinc-400">Dispositivo:</span> {device.summary}</p>
+              )}
+              {device && device.os !== '?' && (
+                <p className="text-[10px] text-zinc-500"><span className="text-zinc-400">SO:</span> {device.os} · <span className="text-zinc-400">Navegador:</span> {device.browser}</p>
+              )}
+              {log.session_id && (
+                <p className="text-[10px] text-zinc-500"><span className="text-zinc-400">Sessao:</span> <span className="font-mono text-[9px] truncate inline-block max-w-[180px] align-bottom">{log.session_id}</span></p>
+              )}
+            </div>
+          )}
+
+          {/* Batch info */}
+          {log.batch_id && (
+            <div className="bg-purple-50 rounded-md p-1.5">
+              <p className="text-[9px] font-bold text-purple-400 uppercase">Operacao em lote</p>
+              <p className="text-[10px] text-purple-700 font-mono truncate">{log.batch_id}</p>
+            </div>
+          )}
+
+          {/* Error */}
+          {isError && log.error_message && (
+            <div className="bg-red-50 rounded-md p-1.5">
+              <p className="text-[9px] font-bold text-red-400 uppercase">Erro</p>
+              <p className="text-[10px] text-red-600">{log.error_message}</p>
+            </div>
+          )}
+
+          {/* Payload */}
+          {log.payload_summary && typeof log.payload_summary === 'object' && Object.keys(log.payload_summary).length > 0 && (
+            <div className="bg-zinc-50 rounded-md p-1.5 space-y-0.5">
+              <p className="text-[9px] font-bold text-zinc-400 uppercase">Detalhes</p>
+              {Object.entries(log.payload_summary).map(([k, v]) => (
+                <p key={k} className="text-[10px] text-zinc-600"><span className="text-zinc-400">{k.replace(/_/g, ' ')}:</span> {String(v)}</p>
+              ))}
+            </div>
+          )}
+
+          {/* Raw user-agent */}
+          {log.user_agent && (
+            <details className="text-[10px]">
+              <summary className="text-zinc-400 cursor-pointer hover:text-zinc-600">User-Agent completo</summary>
+              <p className="text-[9px] text-zinc-500 font-mono mt-0.5 break-all bg-zinc-50 p-1 rounded">{log.user_agent}</p>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AdminOrderDetail() {
   const { id } = useParams<{ id: string }>();
@@ -1685,7 +1855,7 @@ export default function AdminOrderDetail() {
         <p className="text-[10px] text-zinc-300 italic">Visivel apenas para administradores. Nao aparece para o cliente.</p>
       </div>
 
-      {/* ============ TIMELINE / AUDIT TRAIL ============ */}
+      {/* ============ TIMELINE / AUDIT TRAIL (EXPANDABLE ACCORDION) ============ */}
       <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -1722,80 +1892,10 @@ export default function AdminOrderDetail() {
         )}
 
         {timelineLogs.length > 0 && (
-          <div className="space-y-0">
-            {(timelineExpanded ? timelineLogs : timelineLogs.slice(0, 5)).map((log: any, idx: number) => {
-              const isError = log.result === 'error';
-              const isBatch = !!log.batch_id;
-              const actorDisplay = log.actor_label || (log.actor_type === 'webhook' ? 'SuperFrete' : log.actor_type === 'system' ? 'Sistema' : 'Operador');
-              const isLast = idx === (timelineExpanded ? timelineLogs.length - 1 : Math.min(timelineLogs.length - 1, 4));
-              
-              // Action label mapping
-              const actionLabels: Record<string, string> = {
-                'status_change': 'Mudanca de Status',
-                'batch_mark_paid': 'Marcar Pago (lote)',
-                'batch_mark_paid_label': 'Pago + Etiqueta (lote)',
-                'batch_pay_labels': 'Pagar Etiquetas (lote)',
-                'batch_revert_to_paid': 'Reverter para Pago (lote)',
-                'batch_finalize_and_label': 'Finalizar + Etiqueta (lote)',
-                'batch_sync_superfrete': 'Sincronizar SuperFrete (lote)',
-                'generate_label': 'Gerar Etiqueta',
-                'finalize_and_label': 'Finalizar + Etiqueta',
-                'sync_superfrete': 'Sincronizar SuperFrete',
-                'save_observation': 'Salvar Observacao',
-                'update_customer_data': 'Atualizar Dados Cliente',
-                'archive': 'Arquivar',
-                'unarchive': 'Desarquivar',
-                'swap_item': 'Trocar Produto',
-                'resolve_swap_adjustment': 'Resolver Ajuste de Troca',
-                'tracking_update': 'Atualizar Rastreio',
-                'webhook_superfrete': 'Atualizacao SuperFrete',
-              };
-              const actionLabel = actionLabels[log.action_type] || log.action_type.replace(/_/g, ' ');
-              
-              const statusLabels: Record<string, string> = {
-                'awaiting_payment': 'Aguardando Pagamento',
-                'paid': 'Pago',
-                'preparing': 'Preparando',
-                'shipped': 'Enviado',
-                'delivered': 'Entregue',
-                'cancelled': 'Cancelado',
-              };
-
-              return (
-                <div key={log.id} className="flex gap-3">
-                  {/* Timeline line + dot */}
-                  <div className="flex flex-col items-center shrink-0">
-                    <div className={`w-2.5 h-2.5 rounded-full mt-1 ${isError ? 'bg-red-400' : 'bg-emerald-400'}`} />
-                    {!isLast && <div className="w-px flex-1 bg-zinc-200 mt-1" />}
-                  </div>
-                  {/* Content */}
-                  <div className={`flex-1 pb-3 ${isLast ? '' : 'border-b-0'}`}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-semibold text-zinc-800">{actionLabel}</span>
-                      {isBatch && (
-                        <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">Lote</span>
-                      )}
-                      {isError && (
-                        <span className="text-[9px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Erro</span>
-                      )}
-                    </div>
-                    {log.previous_status && log.new_status && log.previous_status !== log.new_status && (
-                      <p className="text-[10px] text-zinc-500 mt-0.5">
-                        {statusLabels[log.previous_status] || log.previous_status} → {statusLabels[log.new_status] || log.new_status}
-                      </p>
-                    )}
-                    {isError && log.error_message && (
-                      <p className="text-[10px] text-red-500 mt-0.5 line-clamp-1">{log.error_message}</p>
-                    )}
-                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-zinc-400">
-                      <span>{new Date(log.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                      <span>&middot;</span>
-                      <span>{actorDisplay}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="space-y-1.5">
+            {(timelineExpanded ? timelineLogs : timelineLogs.slice(0, 5)).map((log: any) => (
+              <TimelineItem key={log.id} log={log} />
+            ))}
             {timelineLogs.length > 5 && !timelineExpanded && (
               <button
                 onClick={() => setTimelineExpanded(true)}
