@@ -262,6 +262,22 @@ const TRIGGER_LABELS: Record<string, string> = {
 // =====================================================================
 // API LAYER
 // =====================================================================
+// Build consistent audit headers (matches adminApi.ts getAuditHeaders)
+function getEmailAuditHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  let sid = sessionStorage.getItem('admin_session_id');
+  if (!sid) {
+    sid = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    sessionStorage.setItem('admin_session_id', sid);
+  }
+  headers['X-Audit-Session-Id'] = sid;
+  headers['X-Audit-Origin'] = 'admin_panel';
+  headers['X-Audit-Actor-Type'] = 'admin';
+  const label = localStorage.getItem('admin_actor_label');
+  if (label) headers['X-Audit-Actor-Label'] = label;
+  return headers;
+}
+
 async function emailFetch(path: string) {
   const token = localStorage.getItem('admin_token');
   if (!token) throw new Error('Nao autenticado');
@@ -269,10 +285,7 @@ async function emailFetch(path: string) {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
-      'X-Audit-Session-Id': sessionStorage.getItem('admin_session_id') || '',
-      'X-Audit-Actor-Label': localStorage.getItem('admin_actor_label') || '',
-      'X-Audit-Origin': 'admin_panel',
-      'X-Audit-Actor-Type': 'admin',
+      ...getEmailAuditHeaders(),
     },
   });
   if (res.status === 401) throw new Error('Sessao expirada');
@@ -290,10 +303,7 @@ async function emailPost(body: any) {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
-      'X-Audit-Session-Id': sessionStorage.getItem('admin_session_id') || '',
-      'X-Audit-Actor-Label': localStorage.getItem('admin_actor_label') || '',
-      'X-Audit-Origin': 'admin_panel',
-      'X-Audit-Actor-Type': 'admin',
+      ...getEmailAuditHeaders(),
     },
     body: JSON.stringify(body),
   });
@@ -1221,7 +1231,7 @@ export default function AdminEmailInbox() {
           { label: 'Automatico', value: log.is_automatic ? 'Sim (sistema)' : 'Nao (manual)' },
           { label: 'Origem', value: TRIGGER_LABELS[log.trigger_source || ''] || log.trigger_source },
           { label: 'Acao', value: log.trigger_action },
-          { label: 'Operador', value: log.actor_label || log.actor_type },
+          { label: 'Operador', value: log.actor_label || (log.actor_type === 'webhook' ? 'SuperFrete' : log.actor_type === 'system' ? 'Sistema' : 'Operador') },
           { label: 'Sessao', value: log.session_id, mono: true },
           { label: 'IP', value: log.ip_address },
         ],

@@ -273,10 +273,24 @@ async function uploadImageToMedusa(file: File): Promise<{ url: string }> {
   const formData = new FormData();
   formData.append('files', file);
 
+  // Build audit headers for upload (same as adminApi.ts getAuditHeaders)
+  const auditHeaders: Record<string, string> = {};
+  let sid = sessionStorage.getItem('admin_session_id');
+  if (!sid) {
+    sid = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    sessionStorage.setItem('admin_session_id', sid);
+  }
+  auditHeaders['X-Audit-Session-Id'] = sid;
+  auditHeaders['X-Audit-Origin'] = 'admin_panel';
+  auditHeaders['X-Audit-Actor-Type'] = 'admin';
+  const label = localStorage.getItem('admin_actor_label');
+  if (label) auditHeaders['X-Audit-Actor-Label'] = label;
+
   const res = await fetch(`${MEDUSA_URL}/admin/uploads`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
+      ...auditHeaders,
     },
     body: formData,
   });
