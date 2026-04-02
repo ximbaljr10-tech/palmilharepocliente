@@ -4,7 +4,7 @@ import { Product } from '../types';
 import { needsColorSelection } from '../types';
 import { useCart } from '../CartContext';
 import { api } from '../api';
-import { Search, Filter, Loader2, Pointer } from 'lucide-react';
+import { Search, Filter, Loader2, Pointer, BookOpen } from 'lucide-react';
 
 const LOGO_URL = "https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0";
 
@@ -146,6 +146,11 @@ export default function Home() {
   const [visibleCount, setVisibleCount] = useState(50);
   const [totalServerCount, setTotalServerCount] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    document.title = "Dente de Tubarao - Linhas de Pipa de Alta Performance | Loja Oficial";
+    document.querySelector('meta[name="description"]')?.setAttribute('content', "Loja oficial Dente de Tubarao. Linhas de pipa de alta resistencia para competicao e lazer. Fio 4, Fio 10, Nylon Indonesia. Envio para todo o Brasil.");
+  }, []);
 
   useEffect(() => {
     loadInitialProducts();
@@ -348,6 +353,22 @@ export default function Home() {
           </p>
         </>
       )}
+
+      {/* Blog & Dicas CTA - helps with content signals and internal linking */}
+      <div className="bg-white rounded-2xl border border-zinc-100 p-6 sm:p-8 mt-8">
+        <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
+          <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+            <BookOpen size={24} className="text-emerald-600" />
+          </div>
+          <div className="flex-1 text-center sm:text-left">
+            <h2 className="font-bold text-zinc-900 text-lg">Blog Dente de Tubarao</h2>
+            <p className="text-sm text-zinc-500 mt-1">Dicas de como escolher a linha ideal, seguranca ao soltar pipa e muito mais.</p>
+          </div>
+          <Link to="/store/blog" className="bg-zinc-900 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-colors shrink-0">
+            Ver artigos
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

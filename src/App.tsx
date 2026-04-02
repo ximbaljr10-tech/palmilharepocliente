@@ -14,6 +14,8 @@ import PoliticaPrivacidade from './pages/PoliticaPrivacidade';
 import TermosUso from './pages/TermosUso';
 import TrocasDevolucoes from './pages/TrocasDevolucoes';
 import FreteEntrega from './pages/FreteEntrega';
+import BlogList from './pages/BlogList';
+import BlogPost from './pages/BlogPost';
 import Footer from './components/Footer';
 
 // New admin imports
@@ -27,9 +29,7 @@ import AdminSoldItems from './admin/AdminSoldItems';
 import AdminEmailInbox from './admin/AdminEmailInbox';
 import AdminAuditoria from './admin/AdminAuditoria';
 
-// Smart scroll management:
-// - New top-level page navigation → scroll to top
-// - Back from detail view → restore previous scroll position
+// Smart scroll management
 function ScrollManager() {
   const { pathname } = useLocation();
   const prevPathRef = React.useRef(pathname);
@@ -38,38 +38,28 @@ function ScrollManager() {
     const prev = prevPathRef.current;
     prevPathRef.current = pathname;
 
-    // Check if navigating BACK from a detail/sub page to a list page
-    // Pattern: /store/admin/pedido/:id → /store/admin/pedidos (restore scroll)
-    // Pattern: /store/product/:id → /store (restore scroll)
     const isReturningToList = (() => {
-      // Admin: from order detail back to orders list
       if (/^\/store\/admin\/pedido\//.test(prev) && /^\/store\/admin\/pedidos/.test(pathname)) return true;
-      // Store: from product detail back to store home
       if (/^\/store\/product\//.test(prev) && pathname === '/store') return true;
       return false;
     })();
 
     if (isReturningToList) {
-      // Restore scroll - let the page's own scroll restoration handle it
-      // (AdminOrders already has sessionStorage-based scroll restoration)
       return;
     }
 
-    // For all new top-level navigations, scroll to top
     window.scrollTo(0, 0);
   }, [pathname]);
 
   return null;
 }
 
-// Analytics tracker - sends pageview + heartbeat for real-time presence
-// Fixed: ensures session persistence, proper page tracking, and reliable heartbeats
+// Analytics tracker
 function AnalyticsTracker() {
   const { pathname } = useLocation();
   const sessionRef = React.useRef<string>('');
   const heartbeatRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   
-  // Initialize session ID once (persisted in sessionStorage)
   React.useEffect(() => {
     let sessionId = sessionStorage.getItem('analytics_session');
     if (!sessionId) {
@@ -80,18 +70,15 @@ function AnalyticsTracker() {
   }, []);
 
   React.useEffect(() => {
-    // Don't track admin pages
     if (pathname.includes('/admin')) return;
 
     const sessionId = sessionRef.current || sessionStorage.getItem('analytics_session');
     if (!sessionId) return;
 
-    // Determine page type based on current path
     let page = 'site';
     if (pathname.includes('/cart')) page = 'cart';
     else if (pathname.includes('/checkout')) page = 'checkout';
 
-    // Send analytics event to backend
     const sendEvent = (eventType: string, currentPage?: string) => {
       const payload = {
         session_id: sessionId,
@@ -109,21 +96,17 @@ function AnalyticsTracker() {
           'x-publishable-api-key': 'pk_b54130691636a84f3172ebbc1d0ac4d9b14bc2430db612d289a055e341b7b706',
         },
         body: JSON.stringify(payload),
-        keepalive: true, // Ensure delivery even on page unload
-      }).catch(() => {}); // Silently fail
+        keepalive: true,
+      }).catch(() => {});
     };
 
-    // Send pageview on route change
     sendEvent('pageview');
 
-    // Clear previous heartbeat interval if any
     if (heartbeatRef.current) {
       clearInterval(heartbeatRef.current);
     }
 
-    // Heartbeat every 25 seconds for real-time presence (slightly under 30s to avoid gaps)
     heartbeatRef.current = setInterval(() => {
-      // Re-check current page context for heartbeat
       let currentPage = 'site';
       const currentPath = window.location.pathname;
       if (currentPath.includes('/cart')) currentPage = 'cart';
@@ -132,7 +115,6 @@ function AnalyticsTracker() {
       sendEvent('heartbeat', currentPage);
     }, 25000);
 
-    // Send a "leave" event when the tab becomes hidden (user switches tab)
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         sendEvent('leave');
@@ -214,17 +196,21 @@ function Header() {
   const itemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
-    <header className="bg-white text-zinc-900 p-4 shadow-sm border-b border-zinc-200 border-t-2 border-t-red-600 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
+    <header className="bg-white text-zinc-900 shadow-sm border-b border-zinc-200 border-t-2 border-t-red-600 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
         <Link to="/store" className="flex items-center">
           <img 
             src="https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0" 
-            alt="Dente de Tubarão Logo" 
+            alt="Dente de Tubarao - Loja de Linhas de Pipa" 
             className="h-12 object-contain"
             referrerPolicy="no-referrer"
           />
         </Link>
-        <div className="flex items-center gap-4 sm:gap-6">
+        <nav className="flex items-center gap-3 sm:gap-5">
+          {/* Institutional links - desktop only */}
+          <Link to="/store/sobre" className="hidden lg:inline text-xs font-medium text-zinc-500 hover:text-emerald-600 transition-colors">Sobre</Link>
+          <Link to="/store/blog" className="hidden lg:inline text-xs font-medium text-zinc-500 hover:text-emerald-600 transition-colors">Blog</Link>
+          <Link to="/store/contato" className="hidden lg:inline text-xs font-medium text-zinc-500 hover:text-emerald-600 transition-colors">Contato</Link>
           {/* Instagram CTA - desktop only */}
           <a
             href="https://www.instagram.com/dentedetubaraooficial"
@@ -251,7 +237,7 @@ function Header() {
               </span>
             )}
           </Link>
-        </div>
+        </nav>
       </div>
     </header>
   );
@@ -277,6 +263,8 @@ function StoreLayout() {
           <Route path="termos-uso" element={<TermosUso />} />
           <Route path="trocas-devolucoes" element={<TrocasDevolucoes />} />
           <Route path="frete-entrega" element={<FreteEntrega />} />
+          <Route path="blog" element={<BlogList />} />
+          <Route path="blog/:slug" element={<BlogPost />} />
         </Routes>
       </main>
       <Footer />

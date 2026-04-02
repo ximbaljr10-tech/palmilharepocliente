@@ -34,6 +34,7 @@ export default function Footer() {
             <div className="flex flex-wrap gap-x-4 gap-y-0.5">
               <Link to="/store/sobre" className="text-xs text-zinc-400 hover:text-white transition-colors">Sobre</Link>
               <Link to="/store/contato" className="text-xs text-zinc-400 hover:text-white transition-colors">Contato</Link>
+              <Link to="/store/blog" className="text-xs text-zinc-400 hover:text-white transition-colors">Blog e Dicas</Link>
               <Link to="/store/frete-entrega" className="text-xs text-zinc-400 hover:text-white transition-colors">Frete e Entrega</Link>
               <Link to="/store/trocas-devolucoes" className="text-xs text-zinc-400 hover:text-white transition-colors">Trocas e Devolucoes</Link>
             </div>

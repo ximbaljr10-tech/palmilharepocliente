@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /store/checkout
+Disallow: /store/cart
+Disallow: /store/my-account
+Disallow: /store/admin
+Disallow: /admin
+Disallow: /admin/
+Disallow: /auth/
+Disallow: /app
+Disallow: /app/
+
+Sitemap: https://www.dentedetubarao.com.br/sitemap.xml

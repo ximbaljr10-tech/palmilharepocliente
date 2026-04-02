@@ -5,6 +5,7 @@ import { Product, ColorPreference, LINE_COLORS, needsColorSelection, getColorsFo
 import { useCart } from '../CartContext';
 import { api } from '../api';
 import { ArrowLeft, ShieldCheck, Truck, CreditCard, Minus, Plus, Loader2, ShoppingCart } from 'lucide-react';
+import Breadcrumbs from '../components/Breadcrumbs';
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -33,7 +34,17 @@ export default function ProductDetail() {
     if (!id) return;
     setLoading(true);
     api.getProduct(id)
-      .then((p) => { if (p) setProduct(p); else navigate('/store'); })
+      .then((p) => {
+        if (p) {
+          setProduct(p);
+          // Dynamic SEO for product pages
+          document.title = `${p.title} - Dente de Tubarao`;
+          const desc = p.description?.replace(/<[^>]*>/g, '').slice(0, 155) || `Compre ${p.title} na Dente de Tubarao. Envio para todo o Brasil com rastreamento.`;
+          document.querySelector('meta[name="description"]')?.setAttribute('content', desc);
+        } else {
+          navigate('/store');
+        }
+      })
       .catch(() => navigate('/store'))
       .finally(() => setLoading(false));
   }, [id, navigate]);
@@ -139,13 +150,7 @@ export default function ProductDetail() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      <button
-        onClick={() => navigate(-1)}
-        className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 transition-colors"
-      >
-        <ArrowLeft size={20} />
-        Voltar para a loja
-      </button>
+      <Breadcrumbs items={[{ label: product.title }]} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 bg-white p-6 sm:p-10 rounded-3xl shadow-sm border border-zinc-100">
         {/* Product Image */}

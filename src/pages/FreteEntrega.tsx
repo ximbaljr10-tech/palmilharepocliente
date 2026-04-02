@@ -1,13 +1,19 @@
-import { ArrowLeft, Truck, Package, Clock } from 'lucide-react';
+import { Truck, Package, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import Breadcrumbs from '../components/Breadcrumbs';
 
 export default function FreteEntrega() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    document.title = "Frete e Entrega - Dente de Tubarao";
+    document.querySelector('meta[name="description"]')?.setAttribute('content', "Informacoes sobre frete e entrega da Dente de Tubarao. Envio por PAC e SEDEX para todo o Brasil com rastreamento completo.");
+  }, []);
+
   return (
     <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
-      <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 transition-colors text-sm">
-        <ArrowLeft size={18} /> Voltar
-      </button>
+      <Breadcrumbs items={[{ label: 'Frete e Entrega' }]} />
       <div className="bg-white rounded-3xl border border-zinc-100 p-6 sm:p-10 space-y-6">
         <h1 className="text-3xl font-bold text-zinc-900">Frete e Entrega</h1>
         <div className="prose prose-zinc max-w-none prose-sm">

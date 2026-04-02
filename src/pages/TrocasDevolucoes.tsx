@@ -1,13 +1,18 @@
-import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import Breadcrumbs from '../components/Breadcrumbs';
 
 export default function TrocasDevolucoes() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    document.title = "Trocas e Devolucoes - Dente de Tubarao";
+    document.querySelector('meta[name="description"]')?.setAttribute('content', "Politica de trocas e devolucoes da Dente de Tubarao. Saiba como solicitar troca de produtos com defeito ou enviados incorretamente.");
+  }, []);
+
   return (
     <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
-      <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 transition-colors text-sm">
-        <ArrowLeft size={18} /> Voltar
-      </button>
+      <Breadcrumbs items={[{ label: 'Trocas e Devolucoes' }]} />
       <div className="bg-white rounded-3xl border border-zinc-100 p-6 sm:p-10 space-y-6">
         <h1 className="text-3xl font-bold text-zinc-900">Trocas e Devolucoes</h1>
         <div className="prose prose-zinc max-w-none prose-sm">
