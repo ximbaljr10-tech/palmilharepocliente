@@ -153,54 +153,29 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    loadInitialProducts();
+    loadAllProducts();
   }, []);
 
-  const loadInitialProducts = async () => {
+  const loadAllProducts = async () => {
     setLoading(true);
     try {
-      // Load first batch of 50
-      const res = await api.getProducts(50, 0);
-      let initial = res.products.filter(p => !p.title.startsWith('Medusa '));
+      // Load ALL published products in a single request.
+      // The Store API only returns published products (max ~200 currently).
+      // Using limit=300 ensures we get everything in one request,
+      // eliminating the two-stage loading that caused partial rendering.
+      const res = await api.getProducts(300, 0);
+      const all = res.products.filter(p => !p.title.startsWith('Medusa '));
       setTotalServerCount(res.count);
-      setAllProducts(initial);
-      setProducts(initial);
+      setAllProducts(all);
+      setProducts(all);
 
-      const uniqueYards: number[] = Array.from(new Set(initial.map(p => p.yards).filter((y): y is number => y != null)));
+      const uniqueYards: number[] = Array.from(new Set(all.map(p => p.yards).filter((y): y is number => y != null)));
       setYardsOptions(uniqueYards.sort((a, b) => a - b));
-
-      // Load remaining products in background for search/filter
-      if (res.count > 50) {
-        loadRemainingProducts(initial, 50, res.count);
-      }
     } catch (err) {
       console.error("Erro ao carregar produtos:", err);
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadRemainingProducts = async (current: Product[], startOffset: number, total: number) => {
-    let all = [...current];
-    let offset = startOffset;
-    const limit = 100;
-
-    while (offset < total) {
-      try {
-        const res = await api.getProducts(limit, offset);
-        const batch = res.products.filter(p => !p.title.startsWith('Medusa '));
-        all = [...all, ...batch];
-        offset += limit;
-      } catch (err) {
-        console.error("Erro ao carregar mais produtos:", err);
-        break;
-      }
-    }
-
-    setAllProducts(all);
-    // Update yards options with full list
-    const uniqueYards = Array.from(new Set(all.map(p => p.yards).filter((y): y is number => y !== null)));
-    setYardsOptions(uniqueYards.sort((a, b) => a - b));
   };
 
   useEffect(() => {
