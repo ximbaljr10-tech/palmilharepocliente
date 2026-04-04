@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { RefreshCw, Package, Clock, CreditCard, BoxIcon, Truck, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, ChevronUp, MessageCircle, MoreVertical, FileText, Trash2, Download, X, Share2, Tag, Wallet, Printer, Search, Filter, Zap, Square, CheckSquare, AlertTriangle, FileDown, RotateCcw } from 'lucide-react';
-import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel, batchFinalizeAndLabelSequential } from './adminApi';
+import { RefreshCw, Package, Clock, CreditCard, BoxIcon, Truck, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, ChevronUp, MessageCircle, MoreVertical, FileText, Trash2, Download, X, Share2, Tag, Wallet, Printer, Search, Filter, Zap, Square, CheckSquare, AlertTriangle, FileDown, RotateCcw, Plus, Eye, Minus } from 'lucide-react';
+import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel, batchFinalizeAndLabelSequential, fetchRemessas, createRemessa, addOrdersToRemessa, removeOrderFromRemessa, undoRemessa, closeRemessa, reopenRemessa, logRemessaPdfExport, logRemessaLabelExport, type Remessa, type OrderRemessaMap } from './adminApi';
+import RemessaManagementOverlay from './RemessaOverlay';
 import { LINE_COLORS } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -90,6 +91,17 @@ export default function AdminOrders() {
   const [showLabelOverlay, setShowLabelOverlay] = useState(false);
   const [printingLabels, setPrintingLabels] = useState(false);
 
+  // ============ REMESSA STATE (only active when filter === 'preparing') ============
+  const [remessas, setRemessas] = useState<Remessa[]>([]);
+  const [orderRemessaMap, setOrderRemessaMap] = useState<OrderRemessaMap>({});
+  const [remessaFilter, setRemessaFilter] = useState<'all' | 'no_remessa' | 'in_remessa' | number>('all');
+  const [showRemessaOverlay, setShowRemessaOverlay] = useState(false);
+  const [activeRemessaId, setActiveRemessaId] = useState<number | null>(null);
+  const [remessaLoading, setRemessaLoading] = useState(false);
+  const [remessaMessage, setRemessaMessage] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
+  const [showAddToDropdown, setShowAddToDropdown] = useState(false);
+  const addToRemessaRef = useRef<HTMLDivElement>(null);
+
   // Global SuperFrete sync state
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ success: boolean; total: number; updated: number; errors: number } | null>(null);
@@ -160,7 +172,18 @@ export default function AdminOrders() {
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const [savedPDFs, setSavedPDFs] = useState<GeneratedPDF[]>([]);
 
-  useEffect(() => { loadOrders(); loadBalance(); }, []);
+  useEffect(() => { loadOrders(); loadBalance(); loadRemessas(); }, []);
+
+  // Load remessas from backend
+  const loadRemessas = async () => {
+    try {
+      const data = await fetchRemessas();
+      setRemessas(data.remessas);
+      setOrderRemessaMap(data.orderRemessaMap);
+    } catch (err) {
+      console.error('Erro ao carregar remessas:', err);
+    }
+  };
 
   const loadBalance = async () => {
     setLoadingBalance(true);
@@ -180,10 +203,11 @@ export default function AdminOrders() {
     const handleClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
       if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target as Node)) setShowFilterDropdown(false);
+      if (addToRemessaRef.current && !addToRemessaRef.current.contains(e.target as Node)) setShowAddToDropdown(false);
     };
-    if (menuOpen || showFilterDropdown) document.addEventListener('mousedown', handleClick);
+    if (menuOpen || showFilterDropdown || showAddToDropdown) document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen, showFilterDropdown]);
+  }, [menuOpen, showFilterDropdown, showAddToDropdown]);
 
   // Load saved PDFs when overlay opens
   useEffect(() => {
@@ -212,16 +236,19 @@ export default function AdminOrders() {
     }
   };
 
-  // Exclude archived from active view
-  const activeOrders = orders.filter(o => !isOrderArchived(o));
+  // Exclude archived from active view (memoized)
+  const activeOrders = useMemo(() => orders.filter(o => !isOrderArchived(o)), [orders]);
 
-  // Count per status
-  const counts: Record<string, number> = {};
-  for (const o of activeOrders) counts[o.status] = (counts[o.status] || 0) + 1;
+  // Count per status (memoized)
+  const counts: Record<string, number> = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const o of activeOrders) c[o.status] = (c[o.status] || 0) + 1;
+    return c;
+  }, [activeOrders]);
 
-  const statusFiltered = filter === 'all'
+  const statusFiltered = useMemo(() => filter === 'all'
     ? activeOrders
-    : activeOrders.filter(o => o.status === filter);
+    : activeOrders.filter(o => o.status === filter), [activeOrders, filter]);
 
   // Apply search query filtering
   const filteredOrders = searchQuery.trim()
@@ -253,6 +280,21 @@ export default function AdminOrders() {
         }
       })
     : statusFiltered;
+
+  // ============ REMESSA SUB-FILTERING (only for 'preparing' tab, memoized) ============
+  const remessaFilteredOrders = useMemo(() => (filter === 'preparing' && remessaFilter !== 'all')
+    ? filteredOrders.filter(o => {
+        const medusaId = o.medusa_order_id || '';
+        const mapping = orderRemessaMap[medusaId];
+        if (remessaFilter === 'no_remessa') return !mapping;
+        if (remessaFilter === 'in_remessa') return !!mapping;
+        if (typeof remessaFilter === 'number') return mapping?.remessa_id === remessaFilter;
+        return true;
+      })
+    : filteredOrders, [filter, remessaFilter, filteredOrders, orderRemessaMap]);
+
+  // Use remessaFilteredOrders for display in preparing, filteredOrders for other tabs
+  const displayOrders = filter === 'preparing' ? remessaFilteredOrders : filteredOrders;
 
   // Orders that have labels generated (superfrete_id) within the current filter
   // FIXED: This is used for the counter display and the "quick PDF" button.
@@ -794,6 +836,224 @@ export default function AdminOrders() {
     setSavedPDFs(getSavedPDFs());
   };
 
+  // ============ REMESSA HELPERS (only for 'preparing', memoized) ============
+  const openRemessas = useMemo(() => remessas.filter(r => r.status === 'open'), [remessas]);
+  const activeRemessa = useMemo(() => activeRemessaId ? remessas.find(r => r.id === activeRemessaId) : null, [activeRemessaId, remessas]);
+
+  // Count how many preparing orders are without remessa (memoized)
+  const { preparingWithoutRemessa, preparingWithRemessa } = useMemo(() => {
+    const preparingOrders = filter === 'preparing' ? filteredOrders : [];
+    return {
+      preparingWithoutRemessa: preparingOrders.filter(o => !orderRemessaMap[o.medusa_order_id || '']),
+      preparingWithRemessa: preparingOrders.filter(o => !!orderRemessaMap[o.medusa_order_id || '']),
+    };
+  }, [filter, filteredOrders, orderRemessaMap]);
+
+  // Smart selection: select only eligible orders (preparing + no remessa)
+  const selectEligibleOrders = () => {
+    const eligible = preparingWithoutRemessa;
+    const newSet = new Set(eligible.map(o => String(o.medusa_order_id || o.id)));
+    setSelectedOrders(newSet);
+    const skipped = preparingWithRemessa.length;
+    if (skipped > 0) {
+      setRemessaMessage({
+        type: 'info',
+        text: `${newSet.size} pedido${newSet.size !== 1 ? 's' : ''} sem remessa selecionado${newSet.size !== 1 ? 's' : ''}. ${skipped} pedido${skipped !== 1 ? 's' : ''} ja pertence${skipped !== 1 ? 'm' : ''} a outras remessas e ficaram de fora.`,
+      });
+    } else {
+      setRemessaMessage({
+        type: 'info',
+        text: `${newSet.size} pedido${newSet.size !== 1 ? 's' : ''} em preparando sem remessa selecionado${newSet.size !== 1 ? 's' : ''}.`,
+      });
+    }
+    setTimeout(() => setRemessaMessage(null), 6000);
+  };
+
+  // Create remessa from selected orders
+  const handleCreateRemessa = async () => {
+    if (selectedOrders.size === 0) return;
+    setRemessaLoading(true);
+    try {
+      const orderIds = Array.from(selectedOrders);
+      const displayIds = orderIds.map(oid => {
+        const o = filteredOrders.find(o => String(o.medusa_order_id || o.id) === oid);
+        return o?.id || 0;
+      });
+      const result = await createRemessa(orderIds, displayIds as number[]);
+      if (result.success) {
+        setRemessaMessage({
+          type: 'success',
+          text: `Remessa ${result.remessa.code} criada com ${result.added} pedido${result.added !== 1 ? 's' : ''}.${result.skipped > 0 ? ` ${result.skipped} ja em outra remessa.` : ''}`,
+        });
+        setSelectedOrders(new Set());
+        await loadRemessas();
+      } else {
+        setRemessaMessage({ type: 'error', text: result.error || 'Erro ao criar remessa.' });
+      }
+    } catch (err: any) {
+      setRemessaMessage({ type: 'error', text: err.message || 'Erro ao criar remessa.' });
+    } finally {
+      setRemessaLoading(false);
+      setTimeout(() => setRemessaMessage(null), 6000);
+    }
+  };
+
+  // Add selected orders to an existing open remessa
+  const handleAddToRemessa = async (remessaId: number) => {
+    if (selectedOrders.size === 0) return;
+    setRemessaLoading(true);
+    try {
+      const orderIds = Array.from(selectedOrders);
+      const displayIds = orderIds.map(oid => {
+        const o = filteredOrders.find(o => String(o.medusa_order_id || o.id) === oid);
+        return o?.id || 0;
+      });
+      const result = await addOrdersToRemessa(remessaId, orderIds, displayIds as number[]);
+      if (result.success !== false) {
+        const rem = remessas.find(r => r.id === remessaId);
+        setRemessaMessage({
+          type: 'success',
+          text: `${result.added} pedido${result.added !== 1 ? 's' : ''} adicionado${result.added !== 1 ? 's' : ''} a ${rem?.code || 'remessa'}.${result.skipped > 0 ? ` ${result.skipped} ja em outra remessa.` : ''}`,
+        });
+        setSelectedOrders(new Set());
+        await loadRemessas();
+      } else {
+        setRemessaMessage({ type: 'error', text: result.error || 'Erro ao adicionar pedidos.' });
+      }
+    } catch (err: any) {
+      setRemessaMessage({ type: 'error', text: err.message || 'Erro ao adicionar pedidos.' });
+    } finally {
+      setRemessaLoading(false);
+      setTimeout(() => setRemessaMessage(null), 6000);
+    }
+  };
+
+  // Remove a single order from remessa
+  const handleRemoveFromRemessa = async (orderId: string, displayId?: number) => {
+    const mapping = orderRemessaMap[orderId];
+    if (!mapping) return;
+    setRemessaLoading(true);
+    try {
+      const result = await removeOrderFromRemessa(mapping.remessa_id, orderId, displayId);
+      if (result.success) {
+        setRemessaMessage({ type: 'success', text: `Pedido #${displayId || '?'} removido da remessa ${mapping.remessa_code}.` });
+        await loadRemessas();
+      } else {
+        setRemessaMessage({ type: 'error', text: result.error || 'Erro ao remover pedido.' });
+      }
+    } catch (err: any) {
+      setRemessaMessage({ type: 'error', text: err.message || 'Erro.' });
+    } finally {
+      setRemessaLoading(false);
+      setTimeout(() => setRemessaMessage(null), 5000);
+    }
+  };
+
+  // Undo an entire remessa
+  const handleUndoRemessa = async (remessaId: number) => {
+    const rem = remessas.find(r => r.id === remessaId);
+    if (!confirm(`Desfazer remessa ${rem?.code || ''}? Todos os pedidos voltam para "sem remessa".`)) return;
+    setRemessaLoading(true);
+    try {
+      const result = await undoRemessa(remessaId);
+      if (result.success) {
+        setRemessaMessage({ type: 'success', text: `Remessa ${rem?.code} desfeita. ${result.freed_orders} pedido${result.freed_orders !== 1 ? 's' : ''} liberado${result.freed_orders !== 1 ? 's' : ''}.` });
+        setActiveRemessaId(null);
+        setRemessaFilter('all');
+        await loadRemessas();
+      }
+    } catch (err: any) {
+      setRemessaMessage({ type: 'error', text: err.message });
+    } finally {
+      setRemessaLoading(false);
+      setTimeout(() => setRemessaMessage(null), 5000);
+    }
+  };
+
+  // Generate PDF for a specific remessa (uses existing buildPDFForOrders — NO content change)
+  const handleRemessaPDF = async (remessaId: number) => {
+    const rem = remessas.find(r => r.id === remessaId);
+    if (!rem) return;
+    // Get orders in this remessa
+    const remessaOrderIds = new Set(rem.order_ids);
+    const ordersForPdf = orders.filter(o => remessaOrderIds.has(o.medusa_order_id));
+    if (ordersForPdf.length === 0) {
+      alert('Nenhum pedido encontrado nesta remessa.');
+      return;
+    }
+    setGeneratingPDF(true);
+    try {
+      const dateStr = `Remessa ${rem.code} - ${new Date().toLocaleDateString('pt-BR')}`;
+      const dataUrl = buildPDFForOrders(ordersForPdf, dateStr);
+      const fileName = `REMESSA-${rem.code}.pdf`;
+      const pdfEntry: GeneratedPDF = {
+        id: `pdf_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        name: fileName, filter: 'remessa', filterLabel: `Remessa ${rem.code}`,
+        date: new Date().toISOString(), orderCount: ordersForPdf.length, dataUrl,
+      };
+      savePDF(pdfEntry);
+      setSavedPDFs(getSavedPDFs());
+      // Auto-download
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      // Log export (does NOT change state)
+      logRemessaPdfExport(remessaId).catch(() => {});
+      setRemessaMessage({ type: 'success', text: `PDF da ${rem.code} baixado (${ordersForPdf.length} pedidos). Nenhum estado alterado.` });
+    } catch (err: any) {
+      setRemessaMessage({ type: 'error', text: 'Erro ao gerar PDF.' });
+    } finally {
+      setGeneratingPDF(false);
+      setTimeout(() => setRemessaMessage(null), 5000);
+    }
+  };
+
+  // Print labels for a specific remessa
+  const handleRemessaLabels = async (remessaId: number) => {
+    const rem = remessas.find(r => r.id === remessaId);
+    if (!rem) return;
+    const remessaOrderIds = new Set(rem.order_ids);
+    const ordersForLabels = orders.filter(o => remessaOrderIds.has(o.medusa_order_id) && !!o.superfrete_id);
+    if (ordersForLabels.length === 0) {
+      alert('Nenhum pedido com etiqueta nesta remessa.');
+      return;
+    }
+    setPrintingLabels(true);
+    try {
+      const sfIds = ordersForLabels.map(o => o.superfrete_id).filter(Boolean);
+      const orderInfo = ordersForLabels.filter(o => o.superfrete_id).map(o => ({
+        superfrete_id: o.superfrete_id,
+        order_id: o.id,
+        customer_name: o.customer_name || '',
+        cep: o.address_components?.cep || '',
+      }));
+      const result = await adminFetch('/admin/superfrete', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'print', orders: sfIds, order_info: orderInfo }),
+      });
+      if (result.success && result.data?.pdf_base64) {
+        const byteCharacters = atob(result.data.pdf_base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        window.open(URL.createObjectURL(blob), '_blank');
+      } else if (result.success && result.data?.url) {
+        window.open(result.data.url, '_blank');
+      } else {
+        alert(result.error || 'Erro ao obter etiquetas.');
+      }
+      logRemessaLabelExport(remessaId).catch(() => {});
+    } catch (err: any) {
+      alert(err.message || 'Erro ao imprimir etiquetas.');
+    } finally {
+      setPrintingLabels(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* ============ SYNCING OVERLAY (non-blocking banner) ============ */}
@@ -1141,6 +1401,42 @@ export default function AdminOrders() {
                     <CreditCard size={11} /> Reverter para Pago
                   </button>
                 )}
+                {filter === 'preparing' && (
+                  <>
+                    <button
+                      onClick={handleCreateRemessa}
+                      disabled={remessaLoading}
+                      className="bg-purple-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-purple-700 flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {remessaLoading ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                      Nova remessa
+                    </button>
+                    {openRemessas.length > 0 && (
+                      <div className="relative" ref={addToRemessaRef}>
+                        <button
+                          onClick={() => setShowAddToDropdown(!showAddToDropdown)}
+                          className="bg-blue-500 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-blue-600 flex items-center gap-1.5"
+                        >
+                          <Plus size={11} /> Adicionar a...
+                        </button>
+                        {showAddToDropdown && (
+                          <div className="absolute bottom-full right-0 mb-1 bg-white border border-zinc-200 rounded-xl shadow-lg z-50 w-48 py-1">
+                            {openRemessas.map(rem => (
+                              <button
+                                key={rem.id}
+                                onClick={() => { handleAddToRemessa(rem.id); setShowAddToDropdown(false); }}
+                                className="w-full text-left px-3 py-2.5 text-xs text-zinc-700 hover:bg-blue-50 transition-colors"
+                              >
+                                <span className="font-bold">{rem.code}</span>
+                                <span className="text-zinc-400 ml-1">({rem.order_count} pedidos)</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
                 <button
                   onClick={() => { setSelectedOrders(new Set()); setBulkResult(null); }}
                   className="text-zinc-400 hover:text-white text-xs px-2 py-1.5"
@@ -1256,12 +1552,131 @@ export default function AdminOrders() {
         </div>
       )}
 
+      {/* ============ REMESSA MESSAGE BANNER ============ */}
+      {remessaMessage && (
+        <div className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-xs ${
+          remessaMessage.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+          remessaMessage.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}>
+          {remessaMessage.type === 'success' ? <CheckCircle2 size={14} className="shrink-0" /> :
+           remessaMessage.type === 'error' ? <XCircle size={14} className="shrink-0" /> :
+           <Package size={14} className="shrink-0" />}
+          <p className="flex-1">{remessaMessage.text}</p>
+          <button onClick={() => setRemessaMessage(null)} className="text-zinc-400 hover:text-zinc-600">&times;</button>
+        </div>
+      )}
+
+      {/* ============ REMESSA AREA — CLEAN MOBILE-FIRST UX (only in 'preparing' tab) ============ */}
+      {filter === 'preparing' && (
+        <div className="space-y-2">
+          {/* --- Compact filter chips --- */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-1 px-1 scrollbar-none">
+            {[
+              { key: 'all' as const, label: 'Todos', count: filteredOrders.length, color: 'purple' },
+              { key: 'no_remessa' as const, label: 'Sem remessa', count: preparingWithoutRemessa.length, color: 'amber' },
+              { key: 'in_remessa' as const, label: 'Com remessa', count: preparingWithRemessa.length, color: 'emerald' },
+            ].map(chip => (
+              <button
+                key={chip.key}
+                onClick={() => setRemessaFilter(chip.key)}
+                className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                  remessaFilter === chip.key
+                    ? chip.color === 'purple' ? 'bg-purple-600 text-white border-purple-600'
+                      : chip.color === 'amber' ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white text-zinc-500 border-zinc-200'
+                }`}
+              >
+                {chip.label} ({chip.count})
+              </button>
+            ))}
+            {openRemessas.map(rem => (
+              <button
+                key={rem.id}
+                onClick={() => { setRemessaFilter(rem.id); setActiveRemessaId(rem.id); }}
+                className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                  remessaFilter === rem.id
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-blue-600 border-blue-200'
+                }`}
+              >
+                {rem.code} ({rem.order_count})
+              </button>
+            ))}
+          </div>
+
+          {/* --- Active remessa card (shown when filtering by specific remessa) --- */}
+          {typeof remessaFilter === 'number' && activeRemessa && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center">
+                    <Package size={14} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-blue-900">{activeRemessa.code}</p>
+                    <p className="text-[10px] text-blue-500">{activeRemessa.order_count} pedidos · {activeRemessa.status === 'open' ? 'Aberta' : 'Fechada'}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleRemessaPDF(activeRemessa.id)}
+                  disabled={generatingPDF}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                >
+                  {generatingPDF ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                  PDF
+                </button>
+                <button
+                  onClick={() => handleRemessaLabels(activeRemessa.id)}
+                  disabled={printingLabels}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 rounded-lg bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                >
+                  {printingLabels ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                  Etiquetas
+                </button>
+                {activeRemessa.status === 'open' && (
+                  <button
+                    onClick={() => handleUndoRemessa(activeRemessa.id)}
+                    className="flex items-center justify-center gap-1 text-[10px] font-semibold px-3 py-2 rounded-lg text-red-600 bg-white border border-red-200 hover:bg-red-50 transition-colors"
+                  >
+                    <RotateCcw size={10} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* --- No remessas yet? Show clear CTA --- */}
+          {openRemessas.length === 0 && filteredOrders.length > 0 && selectedOrders.size === 0 && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center shrink-0">
+                <Package size={16} className="text-purple-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-purple-800">Nenhuma remessa criada</p>
+                <p className="text-[10px] text-purple-500">Selecione pedidos para criar uma remessa e gerar PDF/etiquetas</p>
+              </div>
+              <button
+                onClick={selectEligibleOrders}
+                disabled={preparingWithoutRemessa.length === 0}
+                className="shrink-0 bg-purple-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-purple-700 disabled:opacity-50 transition-colors"
+              >
+                Selecionar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Active filter label */}
       {filter !== 'all' && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-zinc-400">
-            {STATUS_FILTERS.find(s => s.key === filter)?.label || filter} ({filteredOrders.length})
-            {ordersWithLabel.length > 0 && (
+            {STATUS_FILTERS.find(s => s.key === filter)?.label || filter} ({displayOrders.length})
+            {filter !== 'preparing' && ordersWithLabel.length > 0 && (
               <span className="ml-2 text-emerald-500">
                 <Tag size={10} className="inline -mt-0.5" /> {ordersWithLabelToday.length} hoje / {ordersWithLabel.length} total
               </span>
@@ -1277,6 +1692,23 @@ export default function AdminOrders() {
                 {selectedOrders.size === filteredOrders.length ? 'Desmarcar todos' : 'Selecionar todos'}
               </button>
             )}
+            {filter === 'preparing' && filteredOrders.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={selectEligibleOrders}
+                  disabled={preparingWithoutRemessa.length === 0}
+                  className="text-xs text-purple-500 hover:text-purple-700 flex items-center gap-1 disabled:opacity-40"
+                >
+                  <CheckSquare size={12} /> Selecionar elegiveis
+                </button>
+                <button
+                  onClick={() => setShowRemessaOverlay(true)}
+                  className="text-xs text-zinc-400 hover:text-zinc-600 flex items-center gap-1"
+                >
+                  <Eye size={12} /> Remessas
+                </button>
+              </div>
+            )}
             <button onClick={() => setFilter('all')} className="text-xs text-zinc-400 hover:text-zinc-600 underline">
               Ver todos
             </button>
@@ -1290,31 +1722,39 @@ export default function AdminOrders() {
           <Loader2 size={24} className="animate-spin text-zinc-300 mx-auto" />
           <p className="text-zinc-400 mt-3 text-sm">Carregando pedidos...</p>
         </div>
-      ) : filteredOrders.length === 0 ? (
+      ) : displayOrders.length === 0 ? (
         <div className="bg-white p-12 rounded-2xl border border-zinc-100 text-center">
           <Package size={32} className="text-zinc-200 mx-auto mb-2" />
           <p className="text-zinc-400 text-sm">
             {filter === 'all'
               ? 'Nenhum pedido ainda.'
-              : `Nenhum pedido "${STATUS_FILTERS.find(s => s.key === filter)?.label}".`}
+              : filter === 'preparing' && remessaFilter !== 'all'
+                ? 'Nenhum pedido neste filtro de remessa.'
+                : `Nenhum pedido "${STATUS_FILTERS.find(s => s.key === filter)?.label}".`}
           </p>
         </div>
       ) : (
         <div className={`space-y-2 ${selectedOrders.size > 0 ? 'pb-24' : ''}`}>
-          {filteredOrders.map(order => (
-            <OrderListItem
-              key={order.id}
-              order={order}
-              showCheckbox={filter === 'awaiting_payment' || filter === 'paid' || filter === 'cancelled'}
-              isSelected={selectedOrders.has(String(order.medusa_order_id || order.id))}
-              onToggleSelect={() => toggleOrderSelection(String(order.medusa_order_id || order.id))}
-              onClick={() => {
-                // Save scroll position before navigating to detail
-                sessionStorage.setItem(PERSIST_KEYS.scrollY, String(window.scrollY));
-                navigate(`/store/admin/pedido/${order.id}?from=${filter}`);
-              }}
-            />
-          ))}
+          {displayOrders.map(order => {
+            const medusaId = order.medusa_order_id || '';
+            const remessaMapping = filter === 'preparing' ? orderRemessaMap[medusaId] : null;
+            return (
+              <OrderListItem
+                key={order.id}
+                order={order}
+                showCheckbox={filter === 'awaiting_payment' || filter === 'paid' || filter === 'cancelled' || filter === 'preparing'}
+                isSelected={selectedOrders.has(String(order.medusa_order_id || order.id))}
+                onToggleSelect={() => toggleOrderSelection(String(order.medusa_order_id || order.id))}
+                remessaCode={remessaMapping?.remessa_code || null}
+                onRemoveFromRemessa={remessaMapping ? () => handleRemoveFromRemessa(medusaId, order.id) : undefined}
+                onClick={() => {
+                  // Save scroll position before navigating to detail
+                  sessionStorage.setItem(PERSIST_KEYS.scrollY, String(window.scrollY));
+                  navigate(`/store/admin/pedido/${order.id}?from=${filter}`);
+                }}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -1425,6 +1865,24 @@ export default function AdminOrders() {
             )}
           </div>
         </div>
+      )}
+
+      {/* ============ REMESSA MANAGEMENT OVERLAY ============ */}
+      {showRemessaOverlay && (
+        <RemessaManagementOverlay
+          remessas={remessas}
+          allOrders={orders}
+          onClose={() => setShowRemessaOverlay(false)}
+          onPDF={handleRemessaPDF}
+          onLabels={handleRemessaLabels}
+          onUndo={handleUndoRemessa}
+          onCloseRemessa={async (remId) => { await closeRemessa(remId); await loadRemessas(); }}
+          onReopen={async (remId) => { await reopenRemessa(remId); await loadRemessas(); }}
+          savedPDFs={savedPDFs}
+          onDownload={handleDownloadPDF}
+          onShare={handleSharePDF}
+          onDelete={(pdf) => handleDeletePDF(pdf.id)}
+        />
       )}
 
       {/* ============ PDF MANAGEMENT OVERLAY ============ */}
@@ -2113,7 +2571,7 @@ function LabelPrintOverlay({ allOrders, onClose }: { allOrders: any[]; onClose: 
 
 
 // ============ COMPACT ORDER LIST ITEM ============
-function OrderListItem({ order, onClick, showCheckbox, isSelected, onToggleSelect }: { order: any; onClick: () => void; key?: any; showCheckbox?: boolean; isSelected?: boolean; onToggleSelect?: () => void }) {
+function OrderListItem({ order, onClick, showCheckbox, isSelected, onToggleSelect, remessaCode, onRemoveFromRemessa }: { order: any; onClick: () => void; key?: any; showCheckbox?: boolean; isSelected?: boolean; onToggleSelect?: () => void; remessaCode?: string | null; onRemoveFromRemessa?: () => void }) {
   const sc = getStatusConfig(order.status);
   const shippingName = order.shipping_service === 1 ? 'PAC' : order.shipping_service === 2 ? 'SEDEX' : '';
   const itemCount = order.items?.length || 0;
@@ -2168,6 +2626,12 @@ function OrderListItem({ order, onClick, showCheckbox, isSelected, onToggleSelec
             <>
               <span className="shrink-0">·</span>
               <span className="text-orange-500 flex items-center gap-0.5 shrink-0"><Tag size={9} /> Etiqueta</span>
+            </>
+          )}
+          {remessaCode && (
+            <>
+              <span className="shrink-0">·</span>
+              <span className="text-blue-500 flex items-center gap-0.5 shrink-0"><Package size={9} /> {remessaCode}</span>
             </>
           )}
         </div>

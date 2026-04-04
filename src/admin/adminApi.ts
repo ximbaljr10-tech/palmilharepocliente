@@ -697,6 +697,108 @@ export function mapAdminProduct(p: any): {
   };
 }
 
+// ============ REMESSA (Shipment Batch) API ============
+
+export interface Remessa {
+  id: number;
+  code: string;
+  status: 'open' | 'closed' | 'cancelled';
+  notes: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  cancelled_at: string | null;
+  order_count: number;
+  order_ids: string[];
+  order_display_ids: number[];
+}
+
+export interface OrderRemessaMap {
+  [orderId: string]: {
+    remessa_id: number;
+    remessa_code: string;
+    remessa_status: string;
+    order_display_id: number;
+  };
+}
+
+export async function fetchRemessas(): Promise<{ remessas: Remessa[]; orderRemessaMap: OrderRemessaMap }> {
+  try {
+    const result = await adminFetch('/admin/remessas');
+    return {
+      remessas: result.remessas || [],
+      orderRemessaMap: result.orderRemessaMap || {},
+    };
+  } catch (err: any) {
+    console.error('Erro ao carregar remessas:', err);
+    return { remessas: [], orderRemessaMap: {} };
+  }
+}
+
+export async function createRemessa(orderIds: string[], orderDisplayIds: number[], notes?: string): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'create', order_ids: orderIds, order_display_ids: orderDisplayIds, notes: notes || '' }),
+  });
+}
+
+export async function addOrdersToRemessa(remessaId: number, orderIds: string[], orderDisplayIds: number[]): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'add_orders', remessa_id: remessaId, order_ids: orderIds, order_display_ids: orderDisplayIds }),
+  });
+}
+
+export async function removeOrderFromRemessa(remessaId: number, orderId: string, orderDisplayId?: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'remove_order', remessa_id: remessaId, order_id: orderId, order_display_id: orderDisplayId }),
+  });
+}
+
+export async function undoRemessa(remessaId: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'undo', remessa_id: remessaId }),
+  });
+}
+
+export async function closeRemessa(remessaId: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'close', remessa_id: remessaId }),
+  });
+}
+
+export async function reopenRemessa(remessaId: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'reopen', remessa_id: remessaId }),
+  });
+}
+
+export async function logRemessaPdfExport(remessaId: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'log_pdf_export', remessa_id: remessaId }),
+  });
+}
+
+export async function logRemessaLabelExport(remessaId: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'log_label_export', remessa_id: remessaId }),
+  });
+}
+
+export async function getRemessaDetails(remessaId: number): Promise<any> {
+  return adminFetch('/admin/remessas', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'get_details', remessa_id: remessaId }),
+  });
+}
+
 export async function updateOrderCustomerData(
   orderId: number,
   medusa_order_id: string,
