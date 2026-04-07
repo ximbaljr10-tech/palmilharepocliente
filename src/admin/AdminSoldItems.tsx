@@ -1,48 +1,68 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Loader2, BarChart3, Package, Filter, TrendingUp, Hash, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { Loader2, Package, Calendar, FileDown, X, Search } from 'lucide-react';
 import { adminFetch, isOrderArchived, formatCurrency } from './adminApi';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
-type ViewMode = 'yards' | 'brand' | 'combo';
-type Period = 'all' | 'month' | 'week' | 'today';
+// ============================================================
+// AdminSoldItems — Refactored for mobile-first + date filters
+// ============================================================
+// Data source: /admin/pedidos (existing endpoint, no backend changes)
+// Filtering: client-side on order.created_at
+// PDF: jsPDF + autoTable (already in project dependencies)
+// ============================================================
 
-interface SoldItem {
+interface ProductAggregate {
   title: string;
-  quantity: number;
-  yards: number | null;
-  brand: string;
-  revenue: number;
-  orderCount: number;
+  totalQty: number;
+  totalRevenue: number;
+  saleDates: string[]; // unique dates as dd/mm/yyyy
 }
 
-// Extract yards from product title
-function extractYards(title: string): number | null {
-  const match = title.match(/(\d+)\s*(?:j|jds|jardas)\b/i);
-  return match ? parseInt(match[1], 10) : null;
+// Format a Date to YYYY-MM-DD for <input type="date">
+function toInputDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
-// Extract brand from product title
-function extractBrand(title: string): string {
-  const t = title.toLowerCase();
-  if (/indon[eé]sia/i.test(t)) return 'Nylon Esportiva';
-  if (/\bking\b/i.test(t)) return 'King';
-  if (/shark\s*attack/i.test(t)) return 'Shark Attack';
-  if (/carretilha/i.test(t)) return 'Carretilha';
-  if (/camiseta|camisa|bone/i.test(t)) return 'Vestuario';
-  if (/dente\s*de\s*tubar/i.test(t)) return 'Dente de Tubarao';
-  return 'Outros';
+// Format YYYY-MM-DD to dd/mm/yyyy for display
+function formatDisplayDate(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+// Get date string dd/mm/yyyy from a Date object
+function dateToDayStr(date: Date): string {
+  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const y = date.getFullYear();
+  return `${d}/${m}/${y}`;
 }
 
 export default function AdminSoldItems() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<ViewMode>('yards');
-  const [period, setPeriod] = useState<Period>('all');
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+
+  // Date filter state — default: current month
+  const now = new Date();
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [dateFrom, setDateFrom] = useState(toInputDate(firstOfMonth));
+  const [dateTo, setDateTo] = useState(toInputDate(now));
+  const [appliedFrom, setAppliedFrom] = useState(toInputDate(firstOfMonth));
+  const [appliedTo, setAppliedTo] = useState(toInputDate(now));
+  const [filterApplied, setFilterApplied] = useState(true);
+
+  // Search
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => { loadOrders(); }, []);
 
   const loadOrders = async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await adminFetch('/admin/pedidos');
       setOrders(Array.isArray(data) ? data : []);
@@ -50,280 +70,450 @@ export default function AdminSoldItems() {
       if (err.message?.includes('autenticado') || err.message?.includes('expirada')) {
         localStorage.removeItem('admin_token');
         window.location.reload();
+        return;
       }
+      setError('Erro ao carregar dados. Tente novamente.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Filter to only paid/completed orders (exclude cancelled & awaiting)
-  const soldOrders = useMemo(() => {
+  // Filter orders: only paid statuses, within date range
+  const filteredOrders = useMemo(() => {
     const paidStatuses = ['paid', 'preparing', 'shipped', 'delivered'];
     let filtered = orders.filter(o => paidStatuses.includes(o.status) && !isOrderArchived(o));
 
-    // Period filter
-    if (period !== 'all') {
-      const now = new Date();
-      const start = new Date(now);
-      start.setHours(0, 0, 0, 0);
-      if (period === 'week') {
-        const day = start.getDay();
-        start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
-      } else if (period === 'month') {
-        start.setDate(1);
-      }
-      filtered = filtered.filter(o => new Date(o.created_at) >= start);
+    if (filterApplied && appliedFrom && appliedTo) {
+      const startDate = new Date(appliedFrom + 'T00:00:00');
+      const endDate = new Date(appliedTo + 'T23:59:59.999');
+      filtered = filtered.filter(o => {
+        const d = new Date(o.created_at);
+        return d >= startDate && d <= endDate;
+      });
     }
 
     return filtered;
-  }, [orders, period]);
+  }, [orders, appliedFrom, appliedTo, filterApplied]);
 
-  // Extract all sold items from orders
-  const allSoldItems = useMemo(() => {
-    const items: SoldItem[] = [];
-    soldOrders.forEach(order => {
+  // Aggregate sold items by product title, including sale dates
+  const productAggregates = useMemo(() => {
+    const map = new Map<string, ProductAggregate>();
+
+    filteredOrders.forEach(order => {
+      const orderDate = dateToDayStr(new Date(order.created_at));
       (order.items || []).forEach((item: any) => {
-        const title = item.title || '';
-        items.push({
-          title,
-          quantity: item.quantity || 1,
-          yards: extractYards(title),
-          brand: extractBrand(title),
-          revenue: (Number(item.price) || 0) * (item.quantity || 1),
-          orderCount: 1,
-        });
+        const title = (item.title || '').trim();
+        if (!title) return;
+        const qty = item.quantity || 1;
+        const revenue = (Number(item.price) || 0) * qty;
+
+        const existing = map.get(title);
+        if (existing) {
+          existing.totalQty += qty;
+          existing.totalRevenue += revenue;
+          if (!existing.saleDates.includes(orderDate)) {
+            existing.saleDates.push(orderDate);
+          }
+        } else {
+          map.set(title, {
+            title,
+            totalQty: qty,
+            totalRevenue: revenue,
+            saleDates: [orderDate],
+          });
+        }
       });
     });
-    return items;
-  }, [soldOrders]);
 
-  // Aggregated views
-  const byYards = useMemo(() => {
-    const map = new Map<string, { yards: number | null; label: string; totalQty: number; totalRevenue: number; orderCount: number; items: SoldItem[] }>();
-    allSoldItems.forEach(item => {
-      const key = item.yards !== null ? `${item.yards}j` : 'Sem jardas';
-      const existing = map.get(key) || { yards: item.yards, label: key, totalQty: 0, totalRevenue: 0, orderCount: 0, items: [] };
-      existing.totalQty += item.quantity;
-      existing.totalRevenue += item.revenue;
-      existing.orderCount += 1;
-      existing.items.push(item);
-      map.set(key, existing);
+    // Sort sale dates chronologically for each product
+    map.forEach(product => {
+      product.saleDates.sort((a, b) => {
+        const [da, ma, ya] = a.split('/').map(Number);
+        const [db, mb, yb] = b.split('/').map(Number);
+        return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
+      });
     });
+
     return Array.from(map.values()).sort((a, b) => b.totalQty - a.totalQty);
-  }, [allSoldItems]);
+  }, [filteredOrders]);
 
-  const byBrand = useMemo(() => {
-    const map = new Map<string, { brand: string; totalQty: number; totalRevenue: number; orderCount: number; items: SoldItem[] }>();
-    allSoldItems.forEach(item => {
-      const existing = map.get(item.brand) || { brand: item.brand, totalQty: 0, totalRevenue: 0, orderCount: 0, items: [] };
-      existing.totalQty += item.quantity;
-      existing.totalRevenue += item.revenue;
-      existing.orderCount += 1;
-      existing.items.push(item);
-      map.set(item.brand, existing);
+  // Search filter on product list
+  const displayProducts = useMemo(() => {
+    if (!searchTerm.trim()) return productAggregates;
+    const term = searchTerm.toLowerCase().trim();
+    return productAggregates.filter(p => p.title.toLowerCase().includes(term));
+  }, [productAggregates, searchTerm]);
+
+  // Summary metrics
+  const totalItems = productAggregates.reduce((s, p) => s + p.totalQty, 0);
+  const totalRevenue = productAggregates.reduce((s, p) => s + p.totalRevenue, 0);
+  const uniqueProducts = productAggregates.length;
+
+  // Apply filter
+  const handleApplyFilter = useCallback(() => {
+    setAppliedFrom(dateFrom);
+    setAppliedTo(dateTo);
+    setFilterApplied(true);
+  }, [dateFrom, dateTo]);
+
+  // Clear filter (show all time)
+  const handleClearFilter = useCallback(() => {
+    setDateFrom('');
+    setDateTo('');
+    setAppliedFrom('');
+    setAppliedTo('');
+    setFilterApplied(false);
+  }, []);
+
+  // Quick period presets
+  const setPreset = useCallback((preset: 'today' | 'week' | 'month') => {
+    const today = new Date();
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+
+    if (preset === 'week') {
+      const day = start.getDay();
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+    } else if (preset === 'month') {
+      start.setDate(1);
+    }
+
+    const from = toInputDate(start);
+    const to = toInputDate(today);
+    setDateFrom(from);
+    setDateTo(to);
+    setAppliedFrom(from);
+    setAppliedTo(to);
+    setFilterApplied(true);
+  }, []);
+
+  // Period label for display
+  const periodLabel = useMemo(() => {
+    if (!filterApplied || !appliedFrom || !appliedTo) return 'Todo o periodo';
+    return `${formatDisplayDate(appliedFrom)} a ${formatDisplayDate(appliedTo)}`;
+  }, [filterApplied, appliedFrom, appliedTo]);
+
+  // ===================== PDF GENERATION =====================
+  const generatePDF = useCallback(() => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 14;
+    let y = 16;
+
+    // Title
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Relatorio de Itens Vendidos', margin, y);
+    y += 8;
+
+    // Period
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Periodo: ${periodLabel}`, margin, y);
+    y += 5;
+
+    // Generation date
+    const genDate = new Date();
+    doc.text(`Gerado em: ${dateToDayStr(genDate)} as ${String(genDate.getHours()).padStart(2, '0')}:${String(genDate.getMinutes()).padStart(2, '0')}`, margin, y);
+    y += 8;
+
+    // Summary
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Total de itens vendidos: ${totalItems}`, margin, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Produtos unicos: ${uniqueProducts}`, margin, y);
+    y += 5;
+    doc.text(`Faturamento: R$ ${formatCurrency(totalRevenue)}`, margin, y);
+    y += 10;
+
+    // Separator line
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.3);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 6;
+
+    // Product table
+    const tableData = productAggregates.map(p => [
+      p.title,
+      String(p.totalQty),
+      p.saleDates.join(', '),
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Produto', 'Qtd', 'Dias de venda']],
+      body: tableData,
+      margin: { left: margin, right: margin },
+      styles: {
+        fontSize: 8,
+        cellPadding: 3,
+        overflow: 'linebreak',
+        lineColor: [220, 220, 220],
+        lineWidth: 0.2,
+      },
+      headStyles: {
+        fillColor: [39, 39, 42], // zinc-800
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      columnStyles: {
+        0: { cellWidth: 70 },
+        1: { cellWidth: 16, halign: 'center' },
+        2: { cellWidth: 'auto' },
+      },
+      alternateRowStyles: {
+        fillColor: [249, 250, 251], // zinc-50
+      },
     });
-    return Array.from(map.values()).sort((a, b) => b.totalQty - a.totalQty);
-  }, [allSoldItems]);
 
-  const byCombo = useMemo(() => {
-    const map = new Map<string, { brand: string; yards: number | null; label: string; totalQty: number; totalRevenue: number; orderCount: number; items: SoldItem[] }>();
-    allSoldItems.forEach(item => {
-      const yardsLabel = item.yards !== null ? `${item.yards}j` : 'Sem jardas';
-      const key = `${item.brand} - ${yardsLabel}`;
-      const existing = map.get(key) || { brand: item.brand, yards: item.yards, label: key, totalQty: 0, totalRevenue: 0, orderCount: 0, items: [] };
-      existing.totalQty += item.quantity;
-      existing.totalRevenue += item.revenue;
-      existing.orderCount += 1;
-      existing.items.push(item);
-      map.set(key, existing);
-    });
-    return Array.from(map.values()).sort((a, b) => b.totalQty - a.totalQty);
-  }, [allSoldItems]);
+    // Footer on last page
+    // Note: cast to any due to outdated @types/jspdf (v1.3) conflicting with jspdf v4
+    const pageCount = (doc as any).getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      (doc as any).setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(
+        `Pagina ${i} de ${pageCount} — Dente de Tubarao`,
+        pageWidth / 2,
+        (doc as any).internal.pageSize.getHeight() - 8,
+        { align: 'center' }
+      );
+    }
 
-  const totalQty = allSoldItems.reduce((s, i) => s + i.quantity, 0);
-  const totalRevenue = allSoldItems.reduce((s, i) => s + i.revenue, 0);
+    // Generate filename
+    const fromStr = appliedFrom ? appliedFrom.replace(/-/g, '') : 'todos';
+    const toStr = appliedTo ? appliedTo.replace(/-/g, '') : 'todos';
+    const filename = `itens-vendidos_${fromStr}_${toStr}.pdf`;
 
-  const toggleRow = (key: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+    doc.save(filename);
+  }, [productAggregates, periodLabel, totalItems, uniqueProducts, totalRevenue, appliedFrom, appliedTo]);
 
-  const periodLabels: Record<Period, string> = {
-    all: 'Todos',
-    month: 'Mes',
-    week: 'Semana',
-    today: 'Hoje',
-  };
+  // ===================== RENDER =====================
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={24} className="animate-spin text-zinc-400" />
-        <p className="text-zinc-400 ml-3 text-sm">Carregando dados...</p>
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <Loader2 size={28} className="animate-spin text-zinc-300" />
+        <p className="text-zinc-400 text-sm">Carregando itens vendidos...</p>
       </div>
     );
   }
 
-  const currentData = viewMode === 'yards' ? byYards : viewMode === 'brand' ? byBrand : byCombo;
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <p className="text-red-500 text-sm">{error}</p>
+        <button
+          onClick={loadOrders}
+          className="px-4 py-2.5 bg-zinc-900 text-white text-sm font-semibold rounded-xl"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      {/* Summary */}
-      <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
-            <BarChart3 size={18} className="text-blue-600" />
+    <div className="space-y-4 pb-8">
+
+      {/* ===== HEADER + PERIOD SUBTITLE ===== */}
+      <div>
+        <p className="text-xs text-zinc-400 mt-0.5">
+          <Calendar size={12} className="inline -mt-0.5 mr-1" />
+          {periodLabel}
+        </p>
+      </div>
+
+      {/* ===== FILTER BLOCK ===== */}
+      <div className="bg-white rounded-2xl border border-zinc-100 p-4">
+        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Filtrar por periodo</p>
+
+        {/* Quick presets */}
+        <div className="flex gap-2 mb-3">
+          {[
+            { key: 'today' as const, label: 'Hoje' },
+            { key: 'week' as const, label: 'Semana' },
+            { key: 'month' as const, label: 'Mes' },
+          ].map(p => (
+            <button
+              key={p.key}
+              onClick={() => setPreset(p.key)}
+              className="flex-1 py-2 px-2 rounded-lg text-xs font-medium bg-zinc-50 text-zinc-600 border border-zinc-100 active:bg-zinc-100 transition-colors"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Date inputs */}
+        <div className="flex gap-2 items-end">
+          <div className="flex-1 min-w-0">
+            <label className="block text-[11px] text-zinc-400 mb-1">De</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="w-full px-3 py-2.5 border border-zinc-200 rounded-xl text-sm text-zinc-800 bg-white focus:outline-none focus:border-zinc-400 transition-colors"
+            />
           </div>
-          <div>
-            <h2 className="font-bold text-zinc-900 text-sm">Itens Vendidos</h2>
-            <p className="text-[10px] text-zinc-400">{soldOrders.length} pedidos pagos/finalizados</p>
+          <div className="flex-1 min-w-0">
+            <label className="block text-[11px] text-zinc-400 mb-1">Ate</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="w-full px-3 py-2.5 border border-zinc-200 rounded-xl text-sm text-zinc-800 bg-white focus:outline-none focus:border-zinc-400 transition-colors"
+            />
           </div>
         </div>
 
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-emerald-50 rounded-xl p-3 text-center">
-            <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Unidades vendidas</p>
-            <p className="text-2xl font-black text-zinc-900 mt-0.5">{totalQty}</p>
-          </div>
-          <div className="bg-blue-50 rounded-xl p-3 text-center">
-            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Faturamento itens</p>
-            <p className="text-2xl font-black text-zinc-900 mt-0.5">R$ {formatCurrency(totalRevenue)}</p>
-          </div>
+        {/* Action buttons */}
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={handleApplyFilter}
+            disabled={!dateFrom || !dateTo}
+            className="flex-1 py-2.5 px-4 bg-zinc-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed active:bg-zinc-700 transition-colors"
+          >
+            Aplicar
+          </button>
+          <button
+            onClick={handleClearFilter}
+            className="py-2.5 px-4 bg-zinc-100 text-zinc-600 text-sm font-medium rounded-xl active:bg-zinc-200 transition-colors"
+          >
+            Limpar
+          </button>
         </div>
       </div>
 
-      {/* Period selector */}
-      <div className="flex gap-1.5 bg-zinc-100 p-1 rounded-xl">
-        {(['all', 'month', 'week', 'today'] as Period[]).map(p => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
-              period === p ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
-            }`}
-          >
-            {periodLabels[p]}
-          </button>
-        ))}
+      {/* ===== SUMMARY CARDS ===== */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-white rounded-xl border border-zinc-100 p-3 text-center">
+          <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider leading-tight">Itens vendidos</p>
+          <p className="text-xl font-black text-zinc-900 mt-1">{totalItems}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-zinc-100 p-3 text-center">
+          <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider leading-tight">Produtos</p>
+          <p className="text-xl font-black text-zinc-900 mt-1">{uniqueProducts}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-zinc-100 p-3 text-center">
+          <p className="text-[10px] font-bold text-violet-500 uppercase tracking-wider leading-tight">Faturamento</p>
+          <p className="text-lg font-black text-zinc-900 mt-1">
+            <span className="text-xs font-semibold text-zinc-400">R$ </span>
+            {formatCurrency(totalRevenue)}
+          </p>
+        </div>
       </div>
 
-      {/* View mode selector */}
-      <div className="flex gap-1.5">
-        {[
-          { key: 'yards' as ViewMode, label: 'Por Jardas', icon: Hash },
-          { key: 'brand' as ViewMode, label: 'Por Marca', icon: Package },
-          { key: 'combo' as ViewMode, label: 'Marca + Jardas', icon: TrendingUp },
-        ].map(v => (
-          <button
-            key={v.key}
-            onClick={() => { setViewMode(v.key); setExpandedRows(new Set()); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all border flex items-center justify-center gap-1.5 ${
-              viewMode === v.key
-                ? 'bg-zinc-900 text-white border-zinc-900'
-                : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-400'
-            }`}
-          >
-            <v.icon size={12} />
-            {v.label}
-          </button>
-        ))}
+      {/* ===== SEARCH + PDF BUTTON ===== */}
+      <div className="flex gap-2 items-center">
+        <div className="flex-1 relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-300" />
+          <input
+            type="text"
+            placeholder="Buscar produto..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-8 pr-3 py-2.5 border border-zinc-200 rounded-xl text-sm text-zinc-800 bg-white focus:outline-none focus:border-zinc-400 transition-colors placeholder:text-zinc-300"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-300 hover:text-zinc-500"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <button
+          onClick={generatePDF}
+          disabled={productAggregates.length === 0}
+          className="flex items-center gap-1.5 py-2.5 px-4 bg-white border border-zinc-200 text-zinc-600 text-sm font-medium rounded-xl disabled:opacity-40 disabled:cursor-not-allowed active:bg-zinc-50 transition-colors shrink-0"
+          title="Baixar PDF do periodo"
+        >
+          <FileDown size={15} />
+          <span className="hidden sm:inline">PDF</span>
+        </button>
       </div>
 
-      {/* Data table */}
-      {currentData.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-zinc-100 text-center">
-          <Package size={32} className="text-zinc-200 mx-auto mb-2" />
-          <p className="text-zinc-400 text-sm">Nenhum item vendido no periodo selecionado.</p>
+      {/* ===== PRODUCT LIST ===== */}
+      {displayProducts.length === 0 ? (
+        <div className="bg-white p-10 rounded-2xl border border-zinc-100 text-center">
+          <Package size={28} className="text-zinc-200 mx-auto mb-2" />
+          <p className="text-zinc-400 text-sm">
+            {searchTerm
+              ? 'Nenhum produto encontrado para esta busca.'
+              : 'Nenhum item vendido no periodo selecionado.'}
+          </p>
         </div>
       ) : (
-        <div className="space-y-1.5">
-          {/* Header row */}
-          <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-            <div className="col-span-5">
-              {viewMode === 'yards' ? 'Jardas' : viewMode === 'brand' ? 'Marca' : 'Marca + Jardas'}
-            </div>
-            <div className="col-span-2 text-center">Qtd</div>
-            <div className="col-span-2 text-center">Vendas</div>
-            <div className="col-span-3 text-right">Receita</div>
-          </div>
+        <div className="space-y-2">
+          {displayProducts.map((product, idx) => (
+            <div
+              key={product.title}
+              className="bg-white rounded-xl border border-zinc-100 p-4"
+            >
+              {/* Product name + quantity badge */}
+              <div className="flex items-start gap-3">
+                {/* Rank number */}
+                <div className="w-6 h-6 rounded-full bg-zinc-100 flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="text-[10px] font-bold text-zinc-400">{idx + 1}</span>
+                </div>
 
-          {currentData.map((row: any, idx: number) => {
-            const key = row.label || row.brand || String(idx);
-            const isExpanded = expandedRows.has(key);
-            const maxQty = currentData[0]?.totalQty || 1;
-            const barWidth = Math.max(5, (row.totalQty / maxQty) * 100);
+                <div className="flex-1 min-w-0">
+                  {/* Title */}
+                  <p className="text-sm font-semibold text-zinc-900 leading-snug break-words">
+                    {product.title}
+                  </p>
 
-            return (
-              <div key={key}>
-                <button
-                  onClick={() => toggleRow(key)}
-                  className={`w-full bg-white rounded-xl border p-3 hover:border-zinc-300 transition-all text-left ${
-                    isExpanded ? 'border-zinc-300 shadow-sm' : 'border-zinc-100'
-                  }`}
-                >
-                  <div className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-5 flex items-center gap-2 min-w-0">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-sm text-zinc-900 truncate">{key}</p>
-                        <div className="mt-1 h-1.5 rounded-full bg-zinc-100 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-blue-500 transition-all"
-                            style={{ width: `${barWidth}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <span className="font-black text-zinc-900 text-base">{row.totalQty}</span>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <span className="text-xs text-zinc-500">{row.orderCount}x</span>
-                    </div>
-                    <div className="col-span-3 text-right flex items-center justify-end gap-1">
-                      <span className="font-bold text-sm text-zinc-700">R$ {formatCurrency(row.totalRevenue)}</span>
-                      {isExpanded ? <ChevronUp size={12} className="text-zinc-400" /> : <ChevronDown size={12} className="text-zinc-400" />}
+                  {/* Metrics row */}
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      {product.totalQty}
+                      <span className="font-normal text-emerald-500">un</span>
+                    </span>
+                    <span className="text-xs text-zinc-400">
+                      R$ {formatCurrency(product.totalRevenue)}
+                    </span>
+                  </div>
+
+                  {/* Sale dates */}
+                  <div className="mt-2">
+                    <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-1">
+                      Vendido em
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {product.saleDates.map(d => (
+                        <span
+                          key={d}
+                          className="text-[11px] text-zinc-500 bg-zinc-50 px-1.5 py-0.5 rounded"
+                        >
+                          {d}
+                        </span>
+                      ))}
                     </div>
                   </div>
-                </button>
-
-                {/* Expanded: show individual items */}
-                {isExpanded && row.items && (
-                  <div className="ml-4 mt-1 mb-2 space-y-1">
-                    {/* Deduplicate items by title and sum quantities */}
-                    {(() => {
-                      const grouped = new Map<string, { title: string; qty: number; rev: number }>();
-                      row.items.forEach((item: SoldItem) => {
-                        const existing = grouped.get(item.title) || { title: item.title, qty: 0, rev: 0 };
-                        existing.qty += item.quantity;
-                        existing.rev += item.revenue;
-                        grouped.set(item.title, existing);
-                      });
-                      return Array.from(grouped.values())
-                        .sort((a, b) => b.qty - a.qty)
-                        .map((g, i) => (
-                          <div key={i} className="bg-zinc-50 rounded-lg px-3 py-2 flex items-center gap-2 text-xs">
-                            <span className="flex-1 text-zinc-600 truncate">{g.title}</span>
-                            <span className="font-bold text-zinc-800 shrink-0">{g.qty}x</span>
-                            <span className="text-zinc-400 shrink-0">R$ {formatCurrency(g.rev)}</span>
-                          </div>
-                        ));
-                    })()}
-                  </div>
-                )}
+                </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
 
-      <p className="text-center text-[10px] text-zinc-400 pb-4">
-        {currentData.length} {viewMode === 'yards' ? 'tipos de jardas' : viewMode === 'brand' ? 'marcas' : 'combinacoes'} · {totalQty} unidades vendidas
-      </p>
+      {/* ===== FOOTER STATS ===== */}
+      {displayProducts.length > 0 && (
+        <p className="text-center text-[10px] text-zinc-400 pt-2 pb-4">
+          {displayProducts.length === productAggregates.length
+            ? `${uniqueProducts} produtos · ${totalItems} unidades vendidas`
+            : `Exibindo ${displayProducts.length} de ${uniqueProducts} produtos`
+          }
+        </p>
+      )}
     </div>
   );
 }
