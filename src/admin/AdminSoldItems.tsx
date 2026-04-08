@@ -1,15 +1,22 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Loader2, Package, Calendar, FileDown, X, Search } from 'lucide-react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { Loader2, Package, Calendar, FileDown, X, Search, Truck } from 'lucide-react';
 import { adminFetch, isOrderArchived, formatCurrency } from './adminApi';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // ============================================================
-// AdminSoldItems — Refactored for mobile-first + date filters
+// AdminSoldItems — Mobile-first, auto-filter, shipped toggle
 // ============================================================
 // Data source: /admin/pedidos (existing endpoint, no backend changes)
-// Filtering: client-side on order.created_at
-// PDF: jsPDF + autoTable (already in project dependencies)
+// Filtering: client-side on order.created_at + order.status
+// PDF: jsPDF + autoTable (project dependencies)
+// ============================================================
+// CHANGES v2:
+//  - Removed "Aplicar" button — filters apply automatically on change
+//  - Added "Apenas enviados" toggle (shipped + delivered)
+//  - Debounce 300ms on date changes to avoid excessive re-renders
+//  - PDF respects all active filters
+//  - Mobile-first clean UX
 // ============================================================
 
 interface ProductAggregate {
@@ -47,16 +54,39 @@ export default function AdminSoldItems() {
   const [error, setError] = useState<string | null>(null);
 
   // Date filter state — default: current month
+  // No dual state (applied vs pending) — filters apply immediately
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const [dateFrom, setDateFrom] = useState(toInputDate(firstOfMonth));
   const [dateTo, setDateTo] = useState(toInputDate(now));
-  const [appliedFrom, setAppliedFrom] = useState(toInputDate(firstOfMonth));
-  const [appliedTo, setAppliedTo] = useState(toInputDate(now));
-  const [filterApplied, setFilterApplied] = useState(true);
+
+  // Debounced date values — actual filtering uses these
+  const [debouncedFrom, setDebouncedFrom] = useState(toInputDate(firstOfMonth));
+  const [debouncedTo, setDebouncedTo] = useState(toInputDate(now));
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Shipped-only filter
+  const [onlyShipped, setOnlyShipped] = useState(false);
 
   // Search
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Loading indicator for filter changes (subtle, doesn't block UI)
+  const [filtering, setFiltering] = useState(false);
+
+  // Debounce date changes — 300ms delay
+  useEffect(() => {
+    setFiltering(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedFrom(dateFrom);
+      setDebouncedTo(dateTo);
+      setFiltering(false);
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [dateFrom, dateTo]);
 
   useEffect(() => { loadOrders(); }, []);
 
@@ -78,22 +108,36 @@ export default function AdminSoldItems() {
     }
   };
 
-  // Filter orders: only paid statuses, within date range
+  // Filter orders: paid statuses, date range, shipped toggle
   const filteredOrders = useMemo(() => {
+    // Base: only paid statuses (exclude awaiting_payment and cancelled)
     const paidStatuses = ['paid', 'preparing', 'shipped', 'delivered'];
     let filtered = orders.filter(o => paidStatuses.includes(o.status) && !isOrderArchived(o));
 
-    if (filterApplied && appliedFrom && appliedTo) {
-      const startDate = new Date(appliedFrom + 'T00:00:00');
-      const endDate = new Date(appliedTo + 'T23:59:59.999');
+    // Shipped-only filter: show only shipped OR delivered
+    // (delivered is a subset of shipped — every delivered order was shipped first)
+    if (onlyShipped) {
+      filtered = filtered.filter(o => o.status === 'shipped' || o.status === 'delivered');
+    }
+
+    // Date range filter (uses debounced values for smooth UX)
+    if (debouncedFrom && debouncedTo) {
+      const startDate = new Date(debouncedFrom + 'T00:00:00');
+      const endDate = new Date(debouncedTo + 'T23:59:59.999');
       filtered = filtered.filter(o => {
         const d = new Date(o.created_at);
         return d >= startDate && d <= endDate;
       });
+    } else if (debouncedFrom) {
+      const startDate = new Date(debouncedFrom + 'T00:00:00');
+      filtered = filtered.filter(o => new Date(o.created_at) >= startDate);
+    } else if (debouncedTo) {
+      const endDate = new Date(debouncedTo + 'T23:59:59.999');
+      filtered = filtered.filter(o => new Date(o.created_at) <= endDate);
     }
 
     return filtered;
-  }, [orders, appliedFrom, appliedTo, filterApplied]);
+  }, [orders, debouncedFrom, debouncedTo, onlyShipped]);
 
   // Aggregate sold items by product title, including sale dates
   const productAggregates = useMemo(() => {
@@ -149,23 +193,7 @@ export default function AdminSoldItems() {
   const totalRevenue = productAggregates.reduce((s, p) => s + p.totalRevenue, 0);
   const uniqueProducts = productAggregates.length;
 
-  // Apply filter
-  const handleApplyFilter = useCallback(() => {
-    setAppliedFrom(dateFrom);
-    setAppliedTo(dateTo);
-    setFilterApplied(true);
-  }, [dateFrom, dateTo]);
-
-  // Clear filter (show all time)
-  const handleClearFilter = useCallback(() => {
-    setDateFrom('');
-    setDateTo('');
-    setAppliedFrom('');
-    setAppliedTo('');
-    setFilterApplied(false);
-  }, []);
-
-  // Quick period presets
+  // Quick period presets — set dates directly (auto-applies via debounce)
   const setPreset = useCallback((preset: 'today' | 'week' | 'month') => {
     const today = new Date();
     const start = new Date(today);
@@ -182,16 +210,30 @@ export default function AdminSoldItems() {
     const to = toInputDate(today);
     setDateFrom(from);
     setDateTo(to);
-    setAppliedFrom(from);
-    setAppliedTo(to);
-    setFilterApplied(true);
+    // Apply immediately for presets (skip debounce)
+    setDebouncedFrom(from);
+    setDebouncedTo(to);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setFiltering(false);
+  }, []);
+
+  // Clear date filter (show all time)
+  const handleClearDates = useCallback(() => {
+    setDateFrom('');
+    setDateTo('');
+    setDebouncedFrom('');
+    setDebouncedTo('');
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setFiltering(false);
   }, []);
 
   // Period label for display
   const periodLabel = useMemo(() => {
-    if (!filterApplied || !appliedFrom || !appliedTo) return 'Todo o periodo';
-    return `${formatDisplayDate(appliedFrom)} a ${formatDisplayDate(appliedTo)}`;
-  }, [filterApplied, appliedFrom, appliedTo]);
+    if (!debouncedFrom && !debouncedTo) return 'Todo o periodo';
+    if (debouncedFrom && debouncedTo) return `${formatDisplayDate(debouncedFrom)} a ${formatDisplayDate(debouncedTo)}`;
+    if (debouncedFrom) return `A partir de ${formatDisplayDate(debouncedFrom)}`;
+    return `Ate ${formatDisplayDate(debouncedTo)}`;
+  }, [debouncedFrom, debouncedTo]);
 
   // ===================== PDF GENERATION =====================
   const generatePDF = useCallback(() => {
@@ -206,12 +248,18 @@ export default function AdminSoldItems() {
     doc.text('Relatorio de Itens Vendidos', margin, y);
     y += 8;
 
-    // Period
+    // Period + filter info
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 100, 100);
     doc.text(`Periodo: ${periodLabel}`, margin, y);
     y += 5;
+
+    // Shipped filter indicator
+    if (onlyShipped) {
+      doc.text('Filtro: Apenas enviados (enviados + entregues)', margin, y);
+      y += 5;
+    }
 
     // Generation date
     const genDate = new Date();
@@ -287,12 +335,13 @@ export default function AdminSoldItems() {
     }
 
     // Generate filename
-    const fromStr = appliedFrom ? appliedFrom.replace(/-/g, '') : 'todos';
-    const toStr = appliedTo ? appliedTo.replace(/-/g, '') : 'todos';
-    const filename = `itens-vendidos_${fromStr}_${toStr}.pdf`;
+    const fromStr = debouncedFrom ? debouncedFrom.replace(/-/g, '') : 'todos';
+    const toStr = debouncedTo ? debouncedTo.replace(/-/g, '') : 'todos';
+    const shippedSuffix = onlyShipped ? '_enviados' : '';
+    const filename = `itens-vendidos_${fromStr}_${toStr}${shippedSuffix}.pdf`;
 
     doc.save(filename);
-  }, [productAggregates, periodLabel, totalItems, uniqueProducts, totalRevenue, appliedFrom, appliedTo]);
+  }, [productAggregates, periodLabel, totalItems, uniqueProducts, totalRevenue, debouncedFrom, debouncedTo, onlyShipped]);
 
   // ===================== RENDER =====================
 
@@ -323,19 +372,23 @@ export default function AdminSoldItems() {
     <div className="space-y-4 pb-8">
 
       {/* ===== HEADER + PERIOD SUBTITLE ===== */}
-      <div>
-        <p className="text-xs text-zinc-400 mt-0.5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-400">
           <Calendar size={12} className="inline -mt-0.5 mr-1" />
           {periodLabel}
+          {onlyShipped && <span className="ml-1.5 text-blue-500 font-medium">· Enviados</span>}
         </p>
+        {filtering && (
+          <Loader2 size={14} className="animate-spin text-zinc-300" />
+        )}
       </div>
 
       {/* ===== FILTER BLOCK ===== */}
-      <div className="bg-white rounded-2xl border border-zinc-100 p-4">
-        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Filtrar por periodo</p>
+      <div className="bg-white rounded-2xl border border-zinc-100 p-4 space-y-3">
+        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Filtros</p>
 
         {/* Quick presets */}
-        <div className="flex gap-2 mb-3">
+        <div className="flex gap-2">
           {[
             { key: 'today' as const, label: 'Hoje' },
             { key: 'week' as const, label: 'Semana' },
@@ -349,9 +402,19 @@ export default function AdminSoldItems() {
               {p.label}
             </button>
           ))}
+          {/* Clear dates button — only show when dates are set */}
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={handleClearDates}
+              className="py-2 px-3 rounded-lg text-xs font-medium text-zinc-400 border border-zinc-100 active:bg-zinc-50 transition-colors"
+              title="Limpar datas"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
 
-        {/* Date inputs */}
+        {/* Date inputs — auto-apply on change */}
         <div className="flex gap-2 items-end">
           <div className="flex-1 min-w-0">
             <label className="block text-[11px] text-zinc-400 mb-1">De</label>
@@ -373,22 +436,26 @@ export default function AdminSoldItems() {
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2 mt-3">
-          <button
-            onClick={handleApplyFilter}
-            disabled={!dateFrom || !dateTo}
-            className="flex-1 py-2.5 px-4 bg-zinc-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40 disabled:cursor-not-allowed active:bg-zinc-700 transition-colors"
-          >
-            Aplicar
-          </button>
-          <button
-            onClick={handleClearFilter}
-            className="py-2.5 px-4 bg-zinc-100 text-zinc-600 text-sm font-medium rounded-xl active:bg-zinc-200 transition-colors"
-          >
-            Limpar
-          </button>
-        </div>
+        {/* Shipped-only toggle — auto-apply on change */}
+        <button
+          onClick={() => setOnlyShipped(prev => !prev)}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors ${
+            onlyShipped
+              ? 'bg-blue-50 border-blue-200 text-blue-700'
+              : 'bg-zinc-50 border-zinc-100 text-zinc-500'
+          }`}
+        >
+          <Truck size={16} className={onlyShipped ? 'text-blue-500' : 'text-zinc-400'} />
+          <span className="text-sm font-medium flex-1 text-left">Apenas enviados</span>
+          {/* Toggle indicator */}
+          <div className={`w-9 h-5 rounded-full relative transition-colors ${
+            onlyShipped ? 'bg-blue-500' : 'bg-zinc-300'
+          }`}>
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+              onlyShipped ? 'translate-x-4' : 'translate-x-0.5'
+            }`} />
+          </div>
+        </button>
       </div>
 
       {/* ===== SUMMARY CARDS ===== */}
@@ -448,7 +515,9 @@ export default function AdminSoldItems() {
           <p className="text-zinc-400 text-sm">
             {searchTerm
               ? 'Nenhum produto encontrado para esta busca.'
-              : 'Nenhum item vendido no periodo selecionado.'}
+              : onlyShipped
+                ? 'Nenhum item enviado no periodo selecionado.'
+                : 'Nenhum item vendido no periodo selecionado.'}
           </p>
         </div>
       ) : (
