@@ -272,9 +272,14 @@ server {
     # =============================================
     # SPA FALLBACK - everything else serves React app
     # This handles /store/*, /store/cart, /store/admin, etc.
+    # index.html must never be cached so deploys take effect immediately.
+    # Vite-hashed assets in /assets/ remain immutable-cached (see above).
     # =============================================
     location / {
         limit_req zone=general burst=30 nodelay;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
         try_files $uri $uri/ /index.html;
     }
 
