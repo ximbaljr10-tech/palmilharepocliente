@@ -16,6 +16,7 @@ import TrocasDevolucoes from './pages/TrocasDevolucoes';
 import FreteEntrega from './pages/FreteEntrega';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
+import StoreLanding from './pages/StoreLanding'; // Nova pagina de teste UX (rota: /store/nova-home)
 import Footer from './components/Footer';
 
 // New admin imports
@@ -265,6 +266,8 @@ function StoreLayout() {
           <Route path="frete-entrega" element={<FreteEntrega />} />
           <Route path="blog" element={<BlogList />} />
           <Route path="blog/:slug" element={<BlogPost />} />
+          {/* Nova pagina de entrada para teste de UX — nao substitui a home atual */}
+          <Route path="nova-home" element={<StoreLanding />} />
         </Routes>
       </main>
       <Footer />
