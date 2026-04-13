@@ -23,7 +23,7 @@ app.add_middleware(
 async def startup_db_client():
     mongo_url = os.environ.get("MONGO_URL")
     db_name = os.environ.get("DB_NAME", "axiom_db")
-    app.mongodb_client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
+    app.mongodb_client = AsyncIOMotorClient(mongo_url)
     app.mongodb = app.mongodb_client[db_name]
     
     # Indexes
