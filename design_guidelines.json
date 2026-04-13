@@ -1,0 +1,115 @@
+{
+  "project_name": "Axiom Biomechanics",
+  "theme_archetype": "Archetype 2 (Performance Pro) + Archetype 4 (Swiss & High-Contrast)",
+  "vibe_and_tone": "Elite Athleticism, Biomechanical Precision, Authoritative, High-Conversion",
+  "brand_strategy": {
+    "name": "Axiom",
+    "tagline": "A precisão da biomecânica. O futuro da sua clínica.",
+    "color_psychology": "Breaking the 'hospital blue' cliché by using 'Obsidian & Bone' for clinical authority, with 'Kinetic Coral' to represent active movement, energy, and high conversion."
+  },
+  "colors": {
+    "background": "#090A0C",
+    "foreground": "#F4F5F7",
+    "primary": "#FF4D29",
+    "primary_foreground": "#FFFFFF",
+    "secondary": "#13151A",
+    "secondary_foreground": "#D1D5DB",
+    "accent": "#FFB300",
+    "muted": "#1E2024",
+    "muted_foreground": "#8E96A4",
+    "border": "#2A2D35",
+    "input": "#13151A",
+    "ring": "#FF4D29",
+    "success": "#10B981",
+    "destructive": "#EF4444"
+  },
+  "typography": {
+    "headings_font": "Space Grotesk",
+    "body_font": "Manrope",
+    "base_size": "16px",
+    "h1": "text-5xl sm:text-6xl tracking-tighter font-medium leading-none",
+    "h2": "text-3xl sm:text-4xl tracking-tight font-medium",
+    "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+    "body": "text-base leading-relaxed tracking-normal",
+    "overline": "text-xs font-bold uppercase tracking-[0.2em]"
+  },
+  "layout_and_spacing": {
+    "border_radius": "rounded-none",
+    "container_padding": "px-6 md:px-12 lg:px-24",
+    "section_spacing": "py-24 md:py-32",
+    "grid_modes": {
+      "marketing": "grid-cols-1 md:grid-cols-12 gap-8",
+      "dashboard": "grid-cols-1 md:grid-cols-4 lg:grid-cols-12 gap-4"
+    }
+  },
+  "components_strategy": {
+    "buttons": "Sharp corners (rounded-none), solid primary or 1px border. Hover state must translate-y-[-2px] with increased shadow.",
+    "cards": "Cardless approach or 1px border-border/40 with bg-secondary. Flat, no soft shadows. For active states, use a 1px primary border glow.",
+    "inputs": "Flat bg-input, 1px border-border, focus:ring-1 focus:ring-primary focus:border-primary. Sharp corners.",
+    "modals": "Backdrop blur-xl, solid bg-background with 1px border-border. Sharp edges.",
+    "tables": "Dense. border-collapse. Subdued header text (muted-foreground), high-contrast data.",
+    "forms": "Progressive disclosure (steps). Each step takes full width, minimal distractions. Clear Next / Previous buttons."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1756093035138-7135b07084b5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjB0b3BvZ3JhcGh5JTIwbGluZXN8ZW58MHx8fHwxNzc2MTE1MjA5fDA&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract dark topography lines (resembling Baropodometry pressure maps)",
+      "category": "hero_background"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1770219287080-9c73532fa878?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxwaHlzaW90aGVyYXBpc3QlMjBjb25zdWx0aW5nJTIwcGF0aWVudHxlbnwwfHx8fDE3NzYxMTUxODl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Physical therapist measuring patient leg",
+      "category": "professional_feature"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1765914448163-da25d773a87d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHxmZWV0JTIwcnVubmluZyUyMHNob2VzJTIwdHJhY2t8ZW58MHx8fHwxNzc2MTE1MTg5fDA&ixlib=rb-4.1.0&q=85",
+      "description": "Action shot of running shoes - showcasing athletic precision",
+      "category": "patient_feature"
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1764443994825-fdf138cb1653?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGFyY2hpdGVjdHVyYWwlMjBzdHJ1Y3R1cmUlMjBkYXJrfGVufDB8fHx8MTc3NjExNTIwOXww&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract architectural vertical lines",
+      "category": "dashboard_texture"
+    }
+  ],
+  "pages": {
+    "landing_page": {
+      "path": "/",
+      "sections": [
+        "Hero: High-impact headline targeting extra income & clinical precision. Hero bg uses topography lines with bg-black/70 overlay. Primary CTA: 'Prescreva Axiom' (Start Prescribing).",
+        "Value Proposition: Bento grid detailing 1) No initial investment, 2) Simple 3-step order process, 3) Premium custom insoles delivered.",
+        "How It Works: Step-by-step visual timeline (Patient Consult -> Upload Data/Baropodometry -> Receive & Deliver).",
+        "Social Proof / Trust: Professional imagery, quotes.",
+        "Final CTA: Large text block, high contrast, encouraging registration."
+      ]
+    },
+    "professional_dashboard": {
+      "path": "/pro",
+      "features": [
+        "Overview: Stats on ordered insoles, pending deliveries, total extra revenue generated.",
+        "Patient Registry: Simple CRM to manage patients.",
+        "New Order Form (Complex): Progressive step form. Step 1: Patient Select. Step 2: Foot Size & Type (Neutral, Pronated, Supinated). Step 3: Biomechanical Data (Baropodometry upload / photos). Step 4: Review & Payment."
+      ]
+    },
+    "admin_dashboard": {
+      "path": "/admin",
+      "features": [
+        "Global Overview: Total active professionals, total orders, revenue.",
+        "Order Management: Kanban or dense table view of orders (New, In Production, Shipped).",
+        "Professionals List: Manage registered orthopedists/physiotherapists.",
+        "Settings: Configuration for WhatsApp QR code (mocked), Mercado Pago API keys, SMTP settings."
+      ]
+    }
+  },
+  "instructions_to_main_agent": [
+    "Load Google Fonts: 'Space Grotesk' and 'Manrope' in index.html or global CSS.",
+    "Map the colors provided in the JSON to tailwind.config.js perfectly.",
+    "Ensure all interactive elements have data-testid attributes (e.g., data-testid='cta-register', data-testid='form-next-step').",
+    "For the Complex Insole Order Form, use a multi-step progressive disclosure component (Stepper). Do not put all fields on one screen.",
+    "For the Admin Dashboard, the 'WhatsApp QR Code' configuration can be a simple mocked UI showing a dummy QR image and a status of 'Connected'.",
+    "Strictly avoid any generic hospital blues/greens. Stick to the Obsidian and Kinetic Coral palette to maintain the unique 'Performance Pro' aesthetic requested by the user.",
+    "Use Lucide-react for icons. Sharp, thin stroke-width (1.5).",
+    "Use Framer Motion for the Landing Page hero entrance and Bento grid stagger animations.",
+    "Ensure all Shadcn components (cards, inputs, buttons) are customized to have sharp edges (rounded-none) to match the high-contrast technical aesthetic."
+  ]
+}
