@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Activity, DollarSign, Stethoscope, ChevronRight, Layers } from 'lucide-react';
@@ -17,17 +17,6 @@ export default function Landing() {
     hidden: { y: 20, opacity: 0 },
     show: { y: 0, opacity: 1 }
   };
-
-  // Add Spline Viewer script dynamically
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.type = 'module';
-    script.src = 'https://unpkg.com/@splinetool/viewer@1.9.5/build/spline-viewer.js';
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground overflow-hidden">
@@ -77,17 +66,44 @@ export default function Landing() {
           </motion.div>
         </div>
 
-        {/* 3D Element Area */}
-        <div className="relative z-10 lg:w-1/2 w-full h-[400px] lg:h-[600px] mt-12 lg:mt-0 flex items-center justify-center pointer-events-none">
-           {/* We use a generic abstract 3D shape from Spline that looks techy/medical, wrapped in a Framer Motion floating effect */}
+        {/* 3D Element Area (Animated Shoe) */}
+        <div className="relative z-10 lg:w-1/2 w-full h-[400px] lg:h-[600px] mt-12 lg:mt-0 flex items-center justify-center pointer-events-none perspective-1000">
+           {/* Glow Effect */}
            <motion.div 
-             animate={{ y: [-10, 10, -10], rotate: [0, 5, -5, 0] }}
+             animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
+             transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+             className="absolute w-[300px] h-[300px] bg-primary/30 blur-[120px] rounded-full"
+           />
+           
+           {/* Floating & Rotating Shoe Image */}
+           <motion.div
+             animate={{ 
+               y: [-20, 20, -20],
+               rotateY: [0, 10, -10, 0],
+               rotateX: [5, -5, 5]
+             }}
              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-             className="w-full h-full flex items-center justify-center relative"
+             className="relative w-full max-w-lg"
            >
-             <div className="absolute inset-0 bg-primary/5 blur-[100px] rounded-full"></div>
-             {/* Using an abstract shoe/footwear 3D spline model if possible, or a high-tech abstract object */}
-             <spline-viewer url="https://prod.spline.design/v3V13O0tC0p4U494/scene.splinecode" style={{ width: '100%', height: '100%', pointerEvents: 'auto' }}></spline-viewer>
+             <img 
+               src="https://images.unsplash.com/photo-1731132198530-e4b2dc51d511?auto=format&fit=crop&w=1000&q=80" 
+               alt="Axiom Biomechanics 3D Insole and Shoe concept"
+               className="w-full h-auto object-contain rounded-3xl opacity-90"
+               style={{ mixBlendMode: 'screen', filter: 'contrast(1.2) brightness(1.1) drop-shadow(0px 20px 30px rgba(255, 77, 41, 0.2))' }}
+             />
+             
+             {/* Tech Overlay lines */}
+             <motion.div 
+               animate={{ opacity: [0.2, 0.8, 0.2] }}
+               transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+               className="absolute inset-0 border border-primary/30 rounded-3xl"
+             />
+             
+             {/* Abstract floating points representing biomechanical analysis */}
+             <motion.div animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 2, repeat: Infinity }} className="absolute top-[20%] left-[30%] w-3 h-3 bg-white rounded-full shadow-[0_0_15px_#FF4D29]" />
+             <motion.div animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 2.5, repeat: Infinity, delay: 0.5 }} className="absolute bottom-[30%] right-[25%] w-3 h-3 bg-white rounded-full shadow-[0_0_15px_#FF4D29]" />
+             <motion.div animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1.8, repeat: Infinity, delay: 1 }} className="absolute top-[50%] left-[60%] w-2 h-2 bg-primary rounded-full shadow-[0_0_15px_#FF4D29]" />
+             
            </motion.div>
         </div>
       </section>
