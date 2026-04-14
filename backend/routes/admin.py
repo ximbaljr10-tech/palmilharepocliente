@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from pydantic import BaseModel
 from auth_utils import get_admin_user
 from bson import ObjectId
+import httpx
 
 router = APIRouter()
 
@@ -43,7 +44,6 @@ async def get_settings(request: Request, admin=Depends(get_admin_user)):
     if not settings:
         return {}
     settings.pop("_id", None)
-    # Mask passwords
     if settings.get("smtp_password"):
         settings["smtp_password"] = "********"
     if settings.get("mp_access_token"):
@@ -57,3 +57,41 @@ async def update_settings(req: SettingsUpdate, request: Request, admin=Depends(g
     update_doc = {k: v for k, v in req.dict().items() if v is not None and v != "********"}
     await db.settings.update_one({"_id": "global_config"}, {"$set": update_doc}, upsert=True)
     return {"status": "ok"}
+
+# WHATSAPP PROXY ENDPOINTS
+@router.get("/whatsapp/status")
+async def wa_status(admin=Depends(get_admin_user)):
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.get("http://localhost:3001/status")
+            return res.json()
+        except:
+            return {"connected": False, "hasQR": False, "error": "Service offline"}
+
+@router.get("/whatsapp/qr")
+async def wa_qr(admin=Depends(get_admin_user)):
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.get("http://localhost:3001/qr")
+            return res.json()
+        except:
+            return {"qr": None}
+
+@router.post("/whatsapp/connect")
+async def wa_connect(admin=Depends(get_admin_user)):
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.post("http://localhost:3001/connect")
+            return res.json()
+        except:
+            return {"success": False}
+
+@router.post("/whatsapp/disconnect")
+async def wa_disconnect(admin=Depends(get_admin_user)):
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.post("http://localhost:3001/disconnect")
+            return res.json()
+        except:
+            return {"success": False}
+

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, LayoutDashboard, Users, Settings, Activity } from 'lucide-react';
+import { LogOut, LayoutDashboard, Users, Settings, Activity, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -13,6 +13,10 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ pro_count: 0, order_count: 0, recent_orders: [] });
   const [settings, setSettings] = useState({});
   const [activeTab, setActiveTab] = useState('overview');
+  
+  // WA States
+  const [waStatus, setWaStatus] = useState({ connected: false, hasQR: false });
+  const [waQR, setWaQR] = useState(null);
 
   const fetchDashboard = async () => {
     try {
@@ -30,10 +34,31 @@ export default function AdminDashboard() {
     } catch (err) {}
   };
 
+  const checkWaStatus = async () => {
+    try {
+      const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/status`, { withCredentials: true });
+      setWaStatus(res.data);
+      if (res.data.hasQR && !res.data.connected) {
+        const qrRes = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/qr`, { withCredentials: true });
+        setWaQR(qrRes.data.qr);
+      } else {
+        setWaQR(null);
+      }
+    } catch (err) {}
+  };
+
   useEffect(() => {
     fetchDashboard();
     fetchSettings();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      checkWaStatus();
+      const interval = setInterval(checkWaStatus, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   const handleSettingsSave = async (e) => {
     e.preventDefault();
@@ -45,9 +70,22 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleWaConnect = async () => {
+    try {
+      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/connect`, {}, { withCredentials: true });
+      toast.info('Gerando QR Code...');
+    } catch (err) {}
+  };
+
+  const handleWaDisconnect = async () => {
+    try {
+      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/disconnect`, {}, { withCredentials: true });
+      toast.info('Desconectado.');
+    } catch (err) {}
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col md:flex-row">
-      {/* Sidebar */}
       <aside className="w-full md:w-64 border-r border-border bg-card p-6 flex flex-col">
         <div className="font-heading font-bold text-2xl text-primary mb-12 tracking-tighter">AXIOM <span className="text-sm font-normal text-muted-foreground ml-2">ADMIN</span></div>
         <nav className="flex-1 space-y-2">
@@ -72,7 +110,6 @@ export default function AdminDashboard() {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 p-6 md:p-12 overflow-auto">
         <header className="mb-10">
           <h1 className="text-3xl font-heading font-medium">Painel de Controle</h1>
@@ -130,14 +167,24 @@ export default function AdminDashboard() {
 
         {activeTab === 'settings' && (
           <div className="max-w-2xl space-y-8">
-            <div className="mb-6 p-6 border border-border bg-card flex flex-col items-center justify-center text-center">
-              <h3 className="text-lg font-heading mb-2">WhatsApp Web API</h3>
-              <p className="text-sm text-muted-foreground mb-4">Para conectar o Baileys e enviar links de pagamento.</p>
-              {/* Mocked QR Code area */}
-              <div className="w-48 h-48 bg-white p-2 border border-border mb-4">
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=mock_whatsapp_qr" alt="QR Code Mock" className="w-full h-full opacity-50 grayscale" />
+            <div className="p-6 border border-border bg-card flex flex-col items-center justify-center text-center">
+              <h3 className="text-lg font-heading mb-2">WhatsApp Web API (Baileys)</h3>
+              <p className="text-sm text-muted-foreground mb-4">Escaneie o QR Code abaixo com seu WhatsApp para ativar as notificações automáticas e envio de cobranças.</p>
+              
+              <div className="w-64 h-64 bg-white p-2 border border-border mb-4 flex items-center justify-center">
+                {waStatus.connected ? (
+                  <div className="text-success flex flex-col items-center"><CheckCircle2 className="w-16 h-16 mb-2" /> <span className="font-bold">Conectado!</span></div>
+                ) : waQR ? (
+                  <img src={waQR} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
+                ) : (
+                  <div className="text-muted-foreground text-sm flex flex-col items-center"><AlertCircle className="w-8 h-8 mb-2" /> Aguardando inicialização...</div>
+                )}
               </div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-secondary text-sm"><span className="w-2 h-2 rounded-full bg-destructive"></span> Desconectado (Mock)</div>
+              
+              <div className="flex gap-4">
+                {!waStatus.connected && <Button variant="outline" className="rounded-none border-border" onClick={handleWaConnect}>Gerar QR Code</Button>}
+                {waStatus.connected && <Button variant="destructive" className="rounded-none" onClick={handleWaDisconnect}>Desconectar</Button>}
+              </div>
             </div>
 
             <form onSubmit={handleSettingsSave} className="space-y-6">
@@ -147,39 +194,13 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <Label>Access Token</Label>
+                    <Label>Access Token (Para Geração de PIX Automático)</Label>
                     <Input className="rounded-none bg-input" type="text" value={settings.mp_access_token || ''} onChange={e => setSettings({...settings, mp_access_token: e.target.value})} placeholder="APP_USR-..." data-testid="input-mp-token"/>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="rounded-none border-border bg-card">
-                <CardHeader>
-                  <CardTitle className="font-heading">SMTP Email (Hostinger / Gmail)</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label>Host SMTP</Label>
-                      <Input className="rounded-none bg-input" type="text" value={settings.smtp_host || ''} onChange={e => setSettings({...settings, smtp_host: e.target.value})} placeholder="smtp.hostinger.com" />
-                    </div>
-                    <div>
-                      <Label>Porta</Label>
-                      <Input className="rounded-none bg-input" type="number" value={settings.smtp_port || ''} onChange={e => setSettings({...settings, smtp_port: Number(e.target.value)})} placeholder="587" />
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Usuário</Label>
-                    <Input className="rounded-none bg-input" type="text" value={settings.smtp_user || ''} onChange={e => setSettings({...settings, smtp_user: e.target.value})} placeholder="contato@axiom.com" />
-                  </div>
-                  <div>
-                    <Label>Senha</Label>
-                    <Input className="rounded-none bg-input" type="password" value={settings.smtp_password || ''} onChange={e => setSettings({...settings, smtp_password: e.target.value})} placeholder="********" />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Button type="submit" className="rounded-none bg-primary text-white w-full h-12" data-testid="btn-save-settings">Salvar Configurações</Button>
+              <Button type="submit" className="rounded-none bg-primary text-white w-full h-12" data-testid="btn-save-settings">Salvar Configurações API</Button>
             </form>
           </div>
         )}

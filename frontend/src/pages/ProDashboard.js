@@ -2,29 +2,85 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, FilePlus, UserPlus, FileText, CheckCircle2 } from 'lucide-react';
+import { LogOut, FilePlus, UserPlus, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 
 export default function ProDashboard() {
   const { user, logout } = useAuth();
   const [stats, setStats] = useState({ patients_count: 0, orders_count: 0, recent_orders: [] });
+  const [billingModalOpen, setBillingModalOpen] = useState(false);
+  const [currentPatientId, setCurrentPatientId] = useState(null);
+  const [currentOrderId, setCurrentOrderId] = useState(null);
+  const [billingForm, setBillingForm] = useState({
+    cpf: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: '',
+    state: ''
+  });
+
+  const fetchData = async () => {
+    try {
+      const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/pro/dashboard`, { withCredentials: true });
+      setStats(res.data);
+    } catch (err) {
+      toast.error('Erro ao carregar dados.');
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/pro/dashboard`, { withCredentials: true });
-        setStats(res.data);
-      } catch (err) {
-        toast.error('Erro ao carregar dados.');
-      }
-    };
     fetchData();
   }, []);
 
+  const handleGenerateBilling = async (orderId) => {
+    try {
+      const res = await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/orders/${orderId}/billing`, {}, { withCredentials: true });
+      if (res.data.needs_completion) {
+        // Open modal
+        setCurrentPatientId(res.data.patient._id);
+        setCurrentOrderId(orderId);
+        setBillingForm({
+          cpf: res.data.patient.cpf || '',
+          email: res.data.patient.email || '',
+          phone: res.data.patient.phone || '',
+          address: res.data.patient.address || '',
+          city: '',
+          state: ''
+        });
+        setBillingModalOpen(true);
+      } else {
+        toast.success('Cobrança gerada com sucesso!');
+        fetchData();
+      }
+    } catch (err) {
+      toast.error('Erro ao gerar cobrança.');
+    }
+  };
+
+  const submitBillingInfo = async (e) => {
+    e.preventDefault();
+    if (!billingForm.cpf || !billingForm.email || !billingForm.phone) {
+      toast.error("Preencha CPF, Email e Telefone.");
+      return;
+    }
+    
+    try {
+      await axios.put(`${process.env.REACT_APP_BACKEND_URL}/api/pro/patients/${currentPatientId}`, billingForm, { withCredentials: true });
+      setBillingModalOpen(false);
+      // Retry billing
+      await handleGenerateBilling(currentOrderId);
+    } catch (err) {
+      toast.error('Erro ao salvar dados do paciente.');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background flex flex-col md:flex-row">
+    <div className="min-h-screen bg-background flex flex-col md:flex-row relative">
       <aside className="w-full md:w-64 border-r border-border bg-card p-6 flex flex-col">
         <div className="font-heading font-bold text-2xl text-primary mb-12 tracking-tighter">AXIOM <span className="text-sm font-normal text-muted-foreground ml-2">PRO</span></div>
         
@@ -81,9 +137,9 @@ export default function ProDashboard() {
             <thead className="text-xs text-muted-foreground uppercase bg-secondary/50 border-b border-border">
               <tr>
                 <th className="px-6 py-4">Data</th>
-                <th className="px-6 py-4">Paciente (ID)</th>
+                <th className="px-6 py-4">Paciente</th>
                 <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Link de Pagamento (Pix)</th>
+                <th className="px-6 py-4">Ação / Cobrança</th>
               </tr>
             </thead>
             <tbody>
@@ -91,14 +147,20 @@ export default function ProDashboard() {
                 <tr><td colSpan="4" className="px-6 py-8 text-center text-muted-foreground">Nenhum pedido realizado.</td></tr>
               ) : stats.recent_orders.map(order => (
                 <tr key={order._id} className="border-b border-border/50 bg-card hover:bg-secondary/30">
-                  <td className="px-6 py-4">{new Date(order.created_at).toLocaleDateString('pt-BR')}</td>
-                  <td className="px-6 py-4">{order.patient_id.substring(0,8)}...</td>
+                  <td className="px-6 py-4 whitespace-nowrap">{new Date(order.created_at).toLocaleDateString('pt-BR')}</td>
+                  <td className="px-6 py-4">{order.patient_name} <br/><span className="text-xs text-muted-foreground">ID: {order.patient_id.substring(0,6)}</span></td>
                   <td className="px-6 py-4"><span className="px-2 py-1 bg-primary/10 text-primary text-xs font-bold border border-primary/20">{order.status}</span></td>
                   <td className="px-6 py-4">
-                    {order.payment_link.startsWith('000201') ? (
-                      <span className="text-success flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Pix Gerado</span>
+                    {order.payment_link ? (
+                      order.payment_link.startsWith('000201') ? (
+                        <span className="text-success flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Pix Enviado</span>
+                      ) : (
+                        <span className="text-muted-foreground">Erro PIX</span>
+                      )
                     ) : (
-                      <span className="text-muted-foreground">{order.payment_link}</span>
+                      <Button variant="outline" size="sm" className="rounded-none h-8 text-xs border-primary text-primary hover:bg-primary hover:text-white" onClick={() => handleGenerateBilling(order._id)}>
+                        <DollarSign className="w-3 h-3 mr-1" /> Gerar Cobrança
+                      </Button>
                     )}
                   </td>
                 </tr>
@@ -107,6 +169,47 @@ export default function ProDashboard() {
           </table>
         </div>
       </main>
+
+      {/* Modal - Completar Dados de Cobrança */}
+      {billingModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-4 text-accent">
+              <AlertCircle className="w-6 h-6" />
+              <h3 className="text-lg font-heading">Completar Cadastro</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-6">
+              Para gerar a cobrança no Mercado Pago e enviar via WhatsApp, informe os dados obrigatórios do paciente.
+            </p>
+            
+            <form onSubmit={submitBillingInfo} className="space-y-4">
+              <div>
+                <Label>CPF *</Label>
+                <Input required className="rounded-none bg-input" placeholder="000.000.000-00" value={billingForm.cpf} onChange={e => setBillingForm({...billingForm, cpf: e.target.value})} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Email *</Label>
+                  <Input required type="email" className="rounded-none bg-input" value={billingForm.email} onChange={e => setBillingForm({...billingForm, email: e.target.value})} />
+                </div>
+                <div>
+                  <Label>WhatsApp *</Label>
+                  <Input required className="rounded-none bg-input" placeholder="(11) 99999-9999" value={billingForm.phone} onChange={e => setBillingForm({...billingForm, phone: e.target.value})} />
+                </div>
+              </div>
+              <div>
+                <Label>Endereço Completo</Label>
+                <Input className="rounded-none bg-input" placeholder="Rua, Número, Bairro" value={billingForm.address} onChange={e => setBillingForm({...billingForm, address: e.target.value})} />
+              </div>
+              
+              <div className="flex justify-end gap-3 mt-6">
+                <Button type="button" variant="outline" className="rounded-none border-border" onClick={() => setBillingModalOpen(false)}>Cancelar</Button>
+                <Button type="submit" className="rounded-none bg-primary text-white">Salvar e Enviar Cobrança</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
