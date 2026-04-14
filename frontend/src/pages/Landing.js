@@ -1,68 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Activity, DollarSign, Stethoscope, ChevronRight, Layers } from 'lucide-react';
+import { ArrowRight, Activity, DollarSign, Layers } from 'lucide-react';
 import { Button } from '../components/ui/button';
-
-const AxiomInsole3D = () => (
-  <svg viewBox="0 0 200 500" className="w-full h-[120%] object-contain" style={{ filter: 'drop-shadow(0 20px 30px rgba(255, 77, 41, 0.2))' }}>
-    <defs>
-      <linearGradient id="insoleGradient" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor="#1E2024" />
-        <stop offset="100%" stopColor="#13151A" />
-      </linearGradient>
-      <filter id="glow">
-        <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
-        <feMerge>
-          <feMergeNode in="coloredBlur"/>
-          <feMergeNode in="SourceGraphic"/>
-        </feMerge>
-      </filter>
-    </defs>
-    
-    {/* Base Insole Shape */}
-    <path 
-      d="M 100,10 C 60,10 30,50 30,120 C 30,190 60,250 60,330 C 60,400 70,480 100,480 C 130,480 140,400 140,330 C 140,250 170,190 170,120 C 170,50 140,10 100,10 Z" 
-      fill="url(#insoleGradient)" 
-      stroke="#FF4D29" 
-      strokeWidth="2" 
-    />
-    
-    {/* Inner Contours (Arch Support) */}
-    <path 
-      d="M 100,20 C 70,20 45,60 45,120 C 45,180 70,250 70,330 C 70,390 80,460 100,460 C 120,460 130,390 130,330 C 130,250 155,180 155,120 C 155,60 130,20 100,20 Z" 
-      fill="none" 
-      stroke="#2A2D35" 
-      strokeWidth="1" 
-      strokeDasharray="4 4"
-    />
-    
-    {/* Pressure Points with Glow */}
-    {/* Heel */}
-    <circle cx="100" cy="410" r="30" fill="#FF4D29" opacity="0.3" filter="url(#glow)" />
-    <circle cx="100" cy="410" r="15" fill="#FF4D29" opacity="0.6" />
-    <circle cx="100" cy="410" r="4" fill="#FFFFFF" />
-    
-    {/* Metatarsal Heads */}
-    <circle cx="110" cy="120" r="25" fill="#FFB300" opacity="0.3" filter="url(#glow)" />
-    <circle cx="110" cy="120" r="10" fill="#FFB300" opacity="0.7" />
-    <circle cx="110" cy="120" r="3" fill="#FFFFFF" />
-    
-    <circle cx="65" cy="140" r="15" fill="#10B981" opacity="0.3" filter="url(#glow)" />
-    <circle cx="65" cy="140" r="6" fill="#10B981" opacity="0.8" />
-    <circle cx="65" cy="140" r="2" fill="#FFFFFF" />
-    
-    {/* Big Toe */}
-    <circle cx="120" cy="50" r="15" fill="#EF4444" opacity="0.4" filter="url(#glow)" />
-    <circle cx="120" cy="50" r="8" fill="#EF4444" opacity="0.8" />
-    <circle cx="120" cy="50" r="3" fill="#FFFFFF" />
-    
-    {/* Connections / Kinematic Lines */}
-    <path d="M 100,410 L 110,120 L 120,50" fill="none" stroke="#FFFFFF" strokeWidth="1" opacity="0.4" strokeDasharray="2 4" />
-    <path d="M 110,120 L 65,140" fill="none" stroke="#FFFFFF" strokeWidth="1" opacity="0.4" strokeDasharray="2 4" />
-    <path d="M 100,410 L 65,140" fill="none" stroke="#FFFFFF" strokeWidth="1" opacity="0.2" strokeDasharray="2 4" />
-  </svg>
-);
 
 export default function Landing() {
   const container = {
@@ -126,16 +66,16 @@ export default function Landing() {
           </motion.div>
         </div>
 
-        {/* 3D Element Area (Animated Insole) */}
+        {/* 3D Element Area (Animated Custom Insole) */}
         <div className="relative z-10 lg:w-1/2 w-full h-[400px] lg:h-[600px] mt-12 lg:mt-0 flex items-center justify-center pointer-events-none perspective-1000">
            {/* Glow Effect */}
            <motion.div 
              animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-             className="absolute w-[300px] h-[300px] bg-primary/30 blur-[120px] rounded-full"
+             className="absolute w-[300px] h-[300px] bg-primary/40 blur-[120px] rounded-full"
            />
            
-           {/* Floating & Rotating Insole */}
+           {/* Floating & Rotating Insole Image */}
            <motion.div
              animate={{ 
                y: [-20, 20, -20],
@@ -143,9 +83,13 @@ export default function Landing() {
                rotateX: [5, -5, 5]
              }}
              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-             className="relative w-full max-w-sm h-full flex items-center justify-center"
+             className="relative w-full max-w-lg flex items-center justify-center"
            >
-             <AxiomInsole3D />
+             <img 
+               src="/insole_custom.png" 
+               alt="Axiom Biomechanics 3D Insole"
+               className="w-[120%] h-auto object-contain drop-shadow-[0_20px_30px_rgba(255,77,41,0.4)]"
+             />
              
              {/* Tech Overlay lines */}
              <motion.div 
@@ -153,6 +97,11 @@ export default function Landing() {
                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
                className="absolute inset-0 border border-primary/30 rounded-3xl"
              />
+             
+             {/* Abstract floating points representing biomechanical analysis */}
+             <motion.div animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 2, repeat: Infinity }} className="absolute top-[20%] left-[30%] w-3 h-3 bg-white rounded-full shadow-[0_0_15px_#FF4D29]" />
+             <motion.div animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 2.5, repeat: Infinity, delay: 0.5 }} className="absolute bottom-[30%] right-[25%] w-3 h-3 bg-white rounded-full shadow-[0_0_15px_#FF4D29]" />
+             <motion.div animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ duration: 1.8, repeat: Infinity, delay: 1 }} className="absolute top-[50%] left-[60%] w-2 h-2 bg-primary rounded-full shadow-[0_0_15px_#FF4D29]" />
              
            </motion.div>
         </div>
