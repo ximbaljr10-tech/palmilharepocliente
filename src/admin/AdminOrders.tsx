@@ -555,6 +555,16 @@ export default function AdminOrders() {
     }
     const rowColorInfoMap: Map<number, RowColorInfo> = new Map();
 
+    // ---- PER-ROW ORDER NUMBER (for manual drawing in didDrawCell) ----
+    // We draw the order number MANUALLY to guarantee it is never truncated by autotable overflow
+    const rowOrderNumberMap: Map<number, string> = new Map();
+
+    // Format order ID with zero-padding to 6 digits (only for PDF display)
+    const formatOrderId = (id: number | string): string => {
+      const num = String(id);
+      return '#' + num.padStart(6, '0');
+    };
+
     ordersForPdf.forEach((order, orderIdx) => {
       const fullName = (order.customer_name || '').trim();
       const nameParts = fullName.split(/\s+/);
@@ -566,8 +576,9 @@ export default function AdminOrders() {
       if (items.length === 0) {
         // Edge case: order with no items
         const rowIdx = tableData.length;
-        tableData.push([`#${order.id}`, shortName, '-']);
+        tableData.push(['', shortName, '-']); // col 0 empty — number drawn manually
         rowOrderIndex.push(orderIdx);
+        rowOrderNumberMap.set(rowIdx, formatOrderId(order.id));
         rowColorInfoMap.set(rowIdx, { colors: [], isSortida: false, hasColorPref: false });
         return;
       }
@@ -605,11 +616,14 @@ export default function AdminOrders() {
           const rowIdx = tableData.length;
 
           tableData.push([
-            isFirstItem ? `#${order.id}` : '',
+            '', // col 0 empty — order number drawn manually via didDrawCell
             isFirstItem ? shortName : '',
             item.title,
           ]);
           rowOrderIndex.push(orderIdx);
+          if (isFirstItem) {
+            rowOrderNumberMap.set(rowIdx, formatOrderId(order.id));
+          }
           rowColorInfoMap.set(rowIdx, { colors: itemColors.slice(0, 3), isSortida, hasColorPref });
         }
       });
@@ -640,8 +654,8 @@ export default function AdminOrders() {
         overflow: 'linebreak',
       },
       columnStyles: {
-        0: { cellWidth: 24, halign: 'center', fontStyle: 'bold', fontSize: 8.5, textColor: [24, 24, 27], overflow: 'visible' as any },
-        1: { cellWidth: 52 },
+        0: { cellWidth: 26, halign: 'center', fontStyle: 'bold', fontSize: 8.5, textColor: [24, 24, 27] },
+        1: { cellWidth: 50 },
         2: { cellWidth: 'auto', fontSize: 8, textColor: [70, 70, 80] },
       },
       // Alternating background per ORDER (not per row)
@@ -733,6 +747,22 @@ export default function AdminOrders() {
               }
             }
           });
+        }
+
+        // ---- MANUALLY DRAW ORDER NUMBER in column 0 (bypass autotable overflow) ----
+        if (data.column.index === 0) {
+          const rowIdx = data.row.index;
+          const orderNum = rowOrderNumberMap.get(rowIdx);
+          if (orderNum) {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8.5);
+            doc.setTextColor(24, 24, 27);
+            // Center text in cell
+            const textWidth = doc.getTextWidth(orderNum);
+            const cellCenterX = data.cell.x + (data.cell.width / 2) - (textWidth / 2);
+            const cellCenterY = data.cell.y + (data.cell.height / 2) + 1; // +1 for baseline offset
+            doc.text(orderNum, cellCenterX, cellCenterY);
+          }
         }
 
         // Draw thin separator line between orders (before first item of a new order)
