@@ -515,28 +515,28 @@ export default function AdminOrders() {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 14;
+    const margin = 10;
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
     // ---- HEADER ----
     doc.setFillColor(24, 24, 27);
-    doc.rect(0, 0, pageWidth, 38, 'F');
+    doc.rect(0, 0, pageWidth, 28, 'F');
     doc.setFillColor(16, 185, 129);
-    doc.rect(0, 38, pageWidth, 1.2, 'F');
+    doc.rect(0, 28, pageWidth, 1, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.text('Extrato de Pedidos', margin, 17);
-    doc.setFontSize(12);
+    doc.setFontSize(16);
+    doc.text('Extrato de Pedidos', margin, 12);
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(180, 180, 190);
-    doc.text(`Dia operacional: ${dateLabel} (ate 06h do dia seguinte)`, margin, 26);
-    doc.setFontSize(9);
+    doc.text(`Dia operacional: ${dateLabel} (ate 06h do dia seguinte)`, margin, 19);
+    doc.setFontSize(8);
     doc.setTextColor(140, 140, 155);
     const totalItems = ordersForPdf.reduce((sum, o) => sum + (o.items?.length || 0), 0);
-    doc.text(`${ordersForPdf.length} ${ordersForPdf.length === 1 ? 'pedido' : 'pedidos'} com etiqueta  |  ${totalItems} itens  |  ${timeStr}`, margin, 33);
+    doc.text(`${ordersForPdf.length} ${ordersForPdf.length === 1 ? 'pedido' : 'pedidos'} com etiqueta  |  ${totalItems} itens  |  ${timeStr}`, margin, 25);
 
     // ---- BUILD TABLE DATA ----
     // Each row: [N° pedido, Nome, Produto]
@@ -618,7 +618,7 @@ export default function AdminOrders() {
     // ---- RENDER TABLE ----
     // 3 columns: N°, Nome (with color squares drawn inside), Produto
     autoTable(doc, {
-      startY: 47,
+      startY: 34,
       margin: { left: margin, right: margin },
       head: [['N\u00b0', 'Nome', 'Produto']],
       body: tableData,
@@ -628,20 +628,20 @@ export default function AdminOrders() {
         textColor: [255, 255, 255],
         fontStyle: 'bold',
         fontSize: 8.5,
-        cellPadding: { top: 4.5, bottom: 4.5, left: 5, right: 5 },
+        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
         lineWidth: 0,
         halign: 'left',
       },
       bodyStyles: {
         fontSize: 8.5,
         textColor: [55, 55, 60],
-        cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 },
+        cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
         lineWidth: 0,
-        overflow: 'ellipsize',
+        overflow: 'linebreak',
       },
       columnStyles: {
-        0: { cellWidth: 18, halign: 'center', fontStyle: 'bold', fontSize: 9, textColor: [24, 24, 27] },
-        1: { cellWidth: 56 },
+        0: { cellWidth: 24, halign: 'center', fontStyle: 'bold', fontSize: 8.5, textColor: [24, 24, 27], overflow: 'visible' as any },
+        1: { cellWidth: 52 },
         2: { cellWidth: 'auto', fontSize: 8, textColor: [70, 70, 80] },
       },
       // Alternating background per ORDER (not per row)
@@ -758,11 +758,11 @@ export default function AdminOrders() {
         const totalPages = (doc as any).internal.getNumberOfPages();
         doc.setDrawColor(228, 228, 231);
         doc.setLineWidth(0.3);
-        doc.line(margin, pageHeight - 16, pageWidth - margin, pageHeight - 16);
-        doc.setFontSize(8);
+        doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+        doc.setFontSize(7.5);
         doc.setTextColor(160, 160, 170);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Pagina ${pageNum} de ${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+        doc.text(`Pagina ${pageNum} de ${totalPages}`, pageWidth / 2, pageHeight - 7, { align: 'center' });
       },
     });
 
