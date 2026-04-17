@@ -17,6 +17,9 @@ import FreteEntrega from './pages/FreteEntrega';
 import BlogList from './pages/BlogList';
 import BlogPost from './pages/BlogPost';
 import StoreLanding from './pages/StoreLanding'; // Nova pagina de teste UX (rota: /store/nova-home)
+import YardCatalog from './pages/YardCatalog'; // Catalogo filtrado por jarda (rota: /store/jardas/:yard)
+import YardSelection from './pages/YardSelection'; // Escolha de jarda (rota: /store/nova-home/jardas)
+import CategoryCatalog from './pages/CategoryCatalog'; // Catálogo por categoria (rota: /store/nova-home/:category)
 import Footer from './components/Footer';
 
 // New admin imports
@@ -253,7 +256,11 @@ function StoreLayout() {
       <AnalyticsTracker />
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 flex-grow w-full">
         <Routes>
-          <Route index element={<Home />} />
+          {/* NOVA ENTRADA DA LOJA: StoreLanding como index de /store.
+              O Home.tsx continua existindo como catálogo completo em /store/catalogo. */}
+          <Route index element={<StoreLanding />} />
+          {/* Catálogo completo (antigo "Home" da loja) — agora em rota dedicada. */}
+          <Route path="catalogo" element={<Home />} />
           <Route path="product/:id" element={<ProductDetail />} />
           <Route path="cart" element={<Cart />} />
           <Route path="checkout" element={<Checkout />} />
@@ -266,8 +273,15 @@ function StoreLayout() {
           <Route path="frete-entrega" element={<FreteEntrega />} />
           <Route path="blog" element={<BlogList />} />
           <Route path="blog/:slug" element={<BlogPost />} />
-          {/* Nova pagina de entrada para teste de UX — nao substitui a home atual */}
+          {/* Alias legado: /store/nova-home continua apontando para StoreLanding
+              para não quebrar links internos (YardSelection, YardCatalog, CategoryCatalog). */}
           <Route path="nova-home" element={<StoreLanding />} />
+          {/* Escolha de jarda — fluxo: landing -> jardas -> catalogo */}
+          <Route path="nova-home/jardas" element={<YardSelection />} />
+          {/* Catálogo por categoria — carretilhas e roupas-acessorios */}
+          <Route path="nova-home/:category" element={<CategoryCatalog />} />
+          {/* Catalogo filtrado por jarda — usado pelos botoes de jarda da landing */}
+          <Route path="jardas/:yard" element={<YardCatalog />} />
         </Routes>
       </main>
       <Footer />

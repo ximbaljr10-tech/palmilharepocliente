@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { Package, Truck, Search, ShoppingBag, Loader2, CheckCircle2, Clock, CreditCard, BoxIcon, MessageCircle, Copy, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import TrackingCodeDisplay from '../components/TrackingCodeDisplay';
 
 // Status cycle for the timeline
 const STATUS_STEPS = [
@@ -217,26 +218,7 @@ function TrackOrderCard({ order, defaultOpen }: { order: any; defaultOpen: boole
           {/* Tracking code */}
           {order.tracking_code && (
             <div className="px-5 sm:px-6 pb-5">
-              <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
-                    <Truck size={18} />
-                  </div>
-                  <div className="flex-grow min-w-0">
-                    <p className="text-xs text-blue-600 font-bold uppercase tracking-wider">Rastreio</p>
-                    <p className="font-mono font-bold text-blue-800 text-sm sm:text-lg truncate">{order.tracking_code}</p>
-                  </div>
-                  <a
-                    href={`https://rastreamento.correios.com.br/app/index.php?objeto=${order.tracking_code}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded-lg transition-all shrink-0"
-                    title="Rastrear nos Correios"
-                  >
-                    <ExternalLink size={18} />
-                  </a>
-                </div>
-              </div>
+              <TrackingCodeDisplay trackingCode={order.tracking_code} variant="customer" />
             </div>
           )}
 

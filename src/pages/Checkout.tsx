@@ -48,9 +48,12 @@ export default function Checkout() {
   const [nameError, setNameError] = useState('');
   const [cpfError, setCpfError] = useState('');
   const [cepError, setCepError] = useState('');
+  const [numberError, setNumberError] = useState('');
   const [copied, setCopied] = useState(false);
   const [shippingAlert, setShippingAlert] = useState<{ oldPrice: number; newPrice: number; newName: string; oldName: string } | null>(null);
   const [recalculating, setRecalculating] = useState(false);
+  const [lastCalcCep, setLastCalcCep] = useState<string>(() => (cartCep || '').replace(/\D/g, ''));
+  const [shippingStaleCheckout, setShippingStaleCheckout] = useState(false);
   const [alertExpanded, setAlertExpanded] = useState(false);
   const [storeConfig, setStoreConfig] = useState({
     pix_key: '', pix_tipo: '', pix_nome: '', pix_banco: '', whatsapp: '',
@@ -59,6 +62,34 @@ export default function Checkout() {
   // Scroll to top when component mounts or step changes
   React.useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [step]);
+
+  // ============================================================
+  // Lock do auto-reload durante o checkout.
+  // O sistema de auto-reload em main.tsx já evita recarregar quando a
+  // URL contém /checkout, mas aqui reforçamos com uma flag global para
+  // garantir: enquanto o cliente está preenchendo o form OU visualizando
+  // a tela de PIX, NINGUÉM recarrega a página por baixo dele.
+  // ============================================================
+  React.useEffect(() => {
+    (window as any).__DDT_LOCK_RELOAD__ = true;
+    return () => {
+      (window as any).__DDT_LOCK_RELOAD__ = false;
+    };
+  }, []);
+
+  // Alerta o usuário se ele tentar fechar/recarregar na tela de PIX
+  // (o pedido já está no banco, mas ele perde a tela com os dados do PIX).
+  React.useEffect(() => {
+    if (step !== 'pix') return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Navegadores modernos ignoram a string custom, mas precisam do returnValue
+      e.returnValue = '';
+      return '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
   }, [step]);
 
   React.useEffect(() => {
@@ -101,6 +132,8 @@ export default function Checkout() {
   };
 
   // ============ CEP VALIDATION ============
+  const cepCalcTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleCepChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     let cep = e.target.value.replace(/\D/g, '');
     if (cep.length > 8) cep = cep.slice(0, 8);
@@ -108,13 +141,24 @@ export default function Checkout() {
     setFormData(prev => ({ ...prev, cep: formattedCep }));
     setCepError('');
 
+    // If CEP becomes incomplete, mark shipping as stale
+    if (cep.length < 8) {
+      if (lastCalcCep && cep.length < 8) {
+        setShippingStaleCheckout(true);
+      }
+      // Cancel any pending recalc timer
+      if (cepCalcTimerRef.current) clearTimeout(cepCalcTimerRef.current);
+      return;
+    }
+
     if (cep.length === 8) {
       setLoadingCep(true);
       try {
         const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
         const data = await response.json();
         if (data.erro) {
-          setCepError('Revise o CEP, ele parece inválido');
+          setCepError('CEP invalido. Verifique e tente novamente.');
+          setShippingStaleCheckout(true);
         } else {
           setCepError('');
           setFormData(prev => ({
@@ -123,39 +167,53 @@ export default function Checkout() {
           }));
           document.getElementById('number')?.focus();
           
-          // CEP divergence check: if checkout CEP is different from cart CEP, recalculate shipping
-          const cartCepClean = (cartCep || '').replace(/\D/g, '');
-          if (cartCepClean && cep !== cartCepClean && selectedShipping) {
+          // ALWAYS recalculate shipping when CEP differs from last calculated CEP
+          if (cep !== lastCalcCep && selectedShipping) {
+            setShippingStaleCheckout(true);
             setRecalculating(true);
-            try {
-              const shippingRes = await api.calculateShipping(cep, cart);
-              if (shippingRes.success && shippingRes.options) {
-                const newOpts = shippingRes.options.map((opt: any) => ({
-                  id: opt.id, name: opt.name,
-                  price: parseFloat(opt.price),
-                  delivery_time: opt.delivery_time,
-                  package: opt.packages?.[0] || null,
-                })).filter((opt: any) => opt.price > 0);
+            // Cancel any pending timer
+            if (cepCalcTimerRef.current) clearTimeout(cepCalcTimerRef.current);
+            cepCalcTimerRef.current = setTimeout(async () => {
+              try {
+                const shippingRes = await api.calculateShipping(cep, cart);
+                if (shippingRes.success && shippingRes.options) {
+                  const newOpts = shippingRes.options.map((opt: any) => ({
+                    id: opt.id, name: opt.name,
+                    price: parseFloat(opt.price),
+                    delivery_time: opt.delivery_time,
+                    package: opt.packages?.[0] || null,
+                  })).filter((opt: any) => opt.price > 0);
 
-                setShippingOptions(newOpts);
-                // Find same service or pick first
-                const sameService = newOpts.find((o: any) => o.id === selectedShipping.id);
-                const newOpt = sameService || newOpts[0];
-                if (newOpt) {
-                  const oldPrice = selectedShipping.price;
-                  const oldName = selectedShipping.name;
-                  setShippingAlert({ oldPrice, newPrice: newOpt.price, newName: newOpt.name, oldName });
-                  setAlertExpanded(false);
-                  setSelectedShipping(newOpt);
+                  setShippingOptions(newOpts);
+                  // Find same service or pick first
+                  const sameService = newOpts.find((o: any) => o.id === selectedShipping.id);
+                  const newOpt = sameService || newOpts[0];
+                  if (newOpt) {
+                    const oldPrice = selectedShipping.price;
+                    const oldName = selectedShipping.name;
+                    setShippingAlert({ oldPrice, newPrice: newOpt.price, newName: newOpt.name, oldName });
+                    setAlertExpanded(false);
+                    setSelectedShipping(newOpt);
+                  }
+                  setLastCalcCep(cep);
+                  setShippingStaleCheckout(false);
+                } else {
+                  setCepError('CEP invalido. Verifique e tente novamente.');
                 }
+              } catch {
+                setCepError('Erro ao recalcular frete. Tente novamente.');
+              } finally {
+                setRecalculating(false);
               }
-            } catch {} finally {
-              setRecalculating(false);
-            }
+            }, 500);
+          } else if (cep === lastCalcCep) {
+            // Same CEP as last calc, shipping is still valid
+            setShippingStaleCheckout(false);
           }
         }
       } catch {
-        setCepError('Revise o CEP, ele parece inválido');
+        setCepError('CEP invalido. Verifique e tente novamente.');
+        setShippingStaleCheckout(true);
       } finally { setLoadingCep(false); }
     }
   };
@@ -183,10 +241,25 @@ export default function Checkout() {
       return;
     }
 
+    // Number validation: required (unless semNumero), only digits, 1-5 chars
+    if (!semNumero) {
+      const cleanNumber = formData.number.replace(/\D/g, '');
+      if (!cleanNumber) {
+        setNumberError('Numero e obrigatorio');
+        document.getElementById('number')?.focus();
+        return;
+      }
+      if (cleanNumber.length > 5) {
+        setNumberError('Maximo 5 digitos');
+        document.getElementById('number')?.focus();
+        return;
+      }
+    }
+
     // CEP format validation
     const cleanCep = formData.cep.replace(/\D/g, '');
     if (cleanCep.length !== 8) {
-      setCepError('Revise o CEP, ele parece inválido');
+      setCepError('CEP invalido. Verifique e tente novamente.');
       document.getElementById('cep')?.focus();
       return;
     }
@@ -194,6 +267,11 @@ export default function Checkout() {
     // If CEP error still set from ViaCEP check, block
     if (cepError) {
       document.getElementById('cep')?.focus();
+      return;
+    }
+
+    // Block if shipping is being recalculated or is stale
+    if (recalculating || shippingStaleCheckout) {
       return;
     }
 
@@ -435,7 +513,7 @@ export default function Checkout() {
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                 <div className="sm:col-span-8">
                   <label htmlFor="street" className="block text-sm font-medium text-zinc-700 mb-1">Rua / Avenida</label>
-                  <input type="text" id="street" required value={formData.street} onChange={(e) => setFormData({ ...formData, street: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all bg-zinc-50" />
+                  <input type="text" id="street" required readOnly value={formData.street} className="w-full px-4 py-3 rounded-xl border border-zinc-200 outline-none transition-all bg-zinc-100 text-zinc-600 cursor-not-allowed" />
                 </div>
                 <div className="sm:col-span-4">
                   <label htmlFor="number" className="block text-sm font-medium text-zinc-700 mb-1">Numero da residencia</label>
@@ -450,6 +528,7 @@ export default function Checkout() {
                     onChange={(e) => {
                       const val = e.target.value.replace(/\D/g, '').slice(0, 5);
                       setFormData({ ...formData, number: val });
+                      if (numberError) setNumberError('');
                     }}
                     onKeyDown={(e) => {
                       // Allow backspace, delete, tab, arrows
@@ -459,17 +538,19 @@ export default function Checkout() {
                       // Block if already 5 digits
                       if (formData.number.length >= 5 && /^\d$/.test(e.key)) e.preventDefault();
                     }}
-                    className={`w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all ${
+                    className={`w-full px-4 py-3 rounded-xl border ${numberError && !semNumero ? 'border-red-400 focus:ring-red-400 focus:border-red-400' : 'border-zinc-200 focus:ring-emerald-500 focus:border-emerald-500'} outline-none transition-all ${
                       semNumero ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed placeholder-zinc-400' : ''
                     }`}
                     placeholder={semNumero ? 'S/N' : 'Ex: 123'}
                   />
+                  {numberError && !semNumero && <p className="text-xs text-red-500 mt-1 font-medium">{numberError}</p>}
                   <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={semNumero}
                       onChange={(e) => {
                         setSemNumero(e.target.checked);
+                        setNumberError('');
                         if (e.target.checked) {
                           setFormData(prev => ({ ...prev, number: '' }));
                         } else {
@@ -486,23 +567,27 @@ export default function Checkout() {
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                 <div className="sm:col-span-6">
                   <label htmlFor="complement" className="block text-sm font-medium text-zinc-700 mb-1">Complemento <span className="text-zinc-400 font-normal">(Opcional)</span></label>
-                  <input type="text" id="complement" value={formData.complement} onChange={(e) => setFormData({ ...formData, complement: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="Apto, Bloco, Casa 2" />
+                  <input type="text" id="complement" maxLength={19} value={formData.complement} onChange={(e) => setFormData({ ...formData, complement: e.target.value.slice(0, 19) })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" placeholder="Apto, Bloco, Casa 2" />
+                  <p className="text-xs text-zinc-400 mt-1">Maximo de 19 caracteres</p>
                 </div>
                 <div className="sm:col-span-6">
                   <label htmlFor="neighborhood" className="block text-sm font-medium text-zinc-700 mb-1">Bairro</label>
-                  <input type="text" id="neighborhood" required value={formData.neighborhood} onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all bg-zinc-50" />
+                  <input type="text" id="neighborhood" required readOnly value={formData.neighborhood} className="w-full px-4 py-3 rounded-xl border border-zinc-200 outline-none transition-all bg-zinc-100 text-zinc-600 cursor-not-allowed" />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                 <div className="sm:col-span-8">
                   <label htmlFor="city" className="block text-sm font-medium text-zinc-700 mb-1">Cidade</label>
-                  <input type="text" id="city" required value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all bg-zinc-50" />
+                  <input type="text" id="city" required readOnly value={formData.city} className="w-full px-4 py-3 rounded-xl border border-zinc-200 outline-none transition-all bg-zinc-100 text-zinc-600 cursor-not-allowed" />
                 </div>
                 <div className="sm:col-span-4">
                   <label htmlFor="state" className="block text-sm font-medium text-zinc-700 mb-1">Estado</label>
-                  <input type="text" id="state" required maxLength={2} value={formData.state} onChange={(e) => setFormData({ ...formData, state: e.target.value.toUpperCase() })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all bg-zinc-50 uppercase" placeholder="SP" />
+                  <input type="text" id="state" required readOnly maxLength={2} value={formData.state} className="w-full px-4 py-3 rounded-xl border border-zinc-200 outline-none transition-all bg-zinc-100 text-zinc-600 cursor-not-allowed uppercase" placeholder="SP" />
                 </div>
               </div>
+              {formData.street && (
+                <p className="text-xs text-zinc-400 mt-2">Endereco incorreto? Digite o CEP correto.</p>
+              )}
             </div>
           </div>
         </form>
@@ -623,8 +708,12 @@ export default function Checkout() {
               <span>R$ {total.toFixed(2).replace('.', ',')}</span>
             </div>
           </div>
-          <button type="submit" form="checkout-form" disabled={submitting} className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
-            {submitting ? 'Processando...' : 'Finalizar Compra'}
+          <button type="submit" form="checkout-form" disabled={submitting || recalculating || shippingStaleCheckout} className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {recalculating ? (
+              <span className="flex items-center gap-2"><Loader2 size={18} className="animate-spin" /> Recalculando frete...</span>
+            ) : shippingStaleCheckout ? (
+              'Aguardando frete atualizado...'
+            ) : submitting ? 'Processando...' : 'Finalizar Compra'}
           </button>
           <div className="mt-4 space-y-2">
             <div className="flex items-center justify-center gap-2 text-xs text-zinc-500">

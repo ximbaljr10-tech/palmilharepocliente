@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, ShoppingBag, TrendingUp, Clock, CreditCard, AlertTriangle, ArrowRight, Loader2, DollarSign, Users, ShoppingCart, LogIn } from 'lucide-react';
-import { adminFetch, MEDUSA_URL, PUBLISHABLE_KEY, REGION_ID, isOrderArchived, formatCurrency, getDateRange, isWithinRange, isWithinHours } from './adminApi';
+import { Package, ShoppingBag, TrendingUp, Clock, CreditCard, Users, ShoppingCart, LogIn, ChevronRight, DollarSign, Loader2 } from 'lucide-react';
+import { adminFetch, isOrderArchived, formatCurrency, getDateRange, isWithinRange, isWithinHours } from './adminApi';
 
 type Period = 'today' | 'week' | 'month';
 
@@ -11,11 +11,9 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('today');
 
-  // Product counts from admin API (correct source of truth)
   const [publishedCount, setPublishedCount] = useState(0);
   const [draftCount, setDraftCount] = useState(0);
 
-  // Analytics state
   const [analytics, setAnalytics] = useState<{
     visits_today: number; visits_week: number; visits_month: number;
     unique_today: number; unique_week: number; unique_month: number;
@@ -25,7 +23,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadData();
     loadAnalytics();
-    // Refresh analytics every 30 seconds
     const interval = setInterval(loadAnalytics, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -39,25 +36,14 @@ export default function AdminDashboard() {
       console.error('Erro ao carregar pedidos:', err);
     }
 
-    // Use admin API for accurate product counts (includes both published AND draft)
     try {
-      let pubCount = 0;
-      let drftCount = 0;
-      
-      // Get published count
       const pubData = await adminFetch('/admin/produtos-custom?limit=1&offset=0&status=published');
-      pubCount = pubData.count || 0;
-      
-      // Get draft count
       const drftData = await adminFetch('/admin/produtos-custom?limit=1&offset=0&status=draft');
-      drftCount = drftData.count || 0;
-
-      setPublishedCount(pubCount);
-      setDraftCount(drftCount);
+      setPublishedCount(pubData.count || 0);
+      setDraftCount(drftData.count || 0);
     } catch {
-      // Products loading is non-critical
+      // Falha silenciosa
     }
-
     setLoading(false);
   };
 
@@ -65,29 +51,18 @@ export default function AdminDashboard() {
     try {
       const data = await adminFetch('/admin/analytics');
       if (data && typeof data === 'object') {
-        // Ensure all fields have defaults to prevent zero display when data is partially available
         setAnalytics({
-          visits_today: data.visits_today || 0,
-          visits_week: data.visits_week || 0,
-          visits_month: data.visits_month || 0,
-          unique_today: data.unique_today || 0,
-          unique_week: data.unique_week || 0,
-          unique_month: data.unique_month || 0,
-          now_on_site: data.now_on_site || 0,
-          now_on_cart: data.now_on_cart || 0,
-          now_on_checkout: data.now_on_checkout || 0,
+          visits_today: data.visits_today || 0, visits_week: data.visits_week || 0, visits_month: data.visits_month || 0,
+          unique_today: data.unique_today || 0, unique_week: data.unique_week || 0, unique_month: data.unique_month || 0,
+          now_on_site: data.now_on_site || 0, now_on_cart: data.now_on_cart || 0, now_on_checkout: data.now_on_checkout || 0,
         });
       }
     } catch (err) {
-      console.warn('Analytics carregamento nao disponivel:', err);
-      // Don't clear existing analytics on error — keep last known state
+      console.warn('Analytics indisponível:', err);
     }
   };
 
-  // Filter out archived for metrics
   const activeOrders = orders.filter(o => !isOrderArchived(o));
-
-  // Period-based metrics
   const { start, end } = getDateRange(period);
   const periodOrders = activeOrders.filter(o => isWithinRange(o.created_at, start, end));
 
@@ -101,100 +76,65 @@ export default function AdminDashboard() {
   const awaitingCount = awaitingPeriodOrders.length;
 
   const potencialTotal = recebido + aguardando;
-
   const pending48h = activeOrders.filter(o => o.status === 'awaiting_payment' && isWithinHours(o.created_at, 48)).length;
   const paid48h = activeOrders.filter(o => paidStatuses.includes(o.status) && isWithinHours(o.created_at, 48)).length;
 
   const periodLabels: Record<Period, string> = {
-    today: 'Hoje',
-    week: 'Semana',
-    month: 'Mes',
+    today: 'Hoje', week: 'Semana', month: 'Mês',
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="text-center space-y-3">
-          <Loader2 size={24} className="animate-spin text-zinc-400 mx-auto" />
-          <p className="text-zinc-400 text-sm">Carregando dados...</p>
-        </div>
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <Loader2 size={24} className="animate-spin text-zinc-400" />
       </div>
     );
   }
 
+  const liveUsers = analytics ? (analytics.now_on_site + analytics.now_on_cart + analytics.now_on_checkout) : 0;
+
   return (
-    <div className="space-y-4 sm:space-y-5">
-      {/* ============ REAL-TIME ANALYTICS (compact strip) ============ */}
+    <div className="space-y-4 pb-6 max-w-2xl mx-auto">
+      
+      {/* ============ 1. TOPO: INDICADOR AO VIVO ============ */}
       {analytics && (
-        <div className="bg-white rounded-xl border border-zinc-100 px-3 py-2.5">
-          {/* Single-row compact presence + visits */}
-          <div className="flex items-center gap-3">
-            {/* Live indicator */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        <div className="flex items-center justify-between bg-white border border-zinc-100 rounded-full px-4 py-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
+              Agora <span className="text-zinc-900 ml-1">{liveUsers}</span>
+            </span>
+          </div>
+          
+          <div className="flex gap-4">
+            {analytics.now_on_cart > 0 && (
+              <span className="flex items-center text-[11px] font-bold text-amber-500">
+                <ShoppingCart size={12} className="mr-1" /> {analytics.now_on_cart} no carrinho
               </span>
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Agora</span>
-            </div>
-
-            {/* Real-time numbers */}
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              <div className="flex items-center gap-1">
-                <Users size={12} className="text-emerald-500" />
-                <span className="text-sm font-bold text-zinc-900">{analytics.now_on_site + analytics.now_on_cart + analytics.now_on_checkout}</span>
-                <span className="text-[10px] text-zinc-400 hidden sm:inline">no site</span>
-              </div>
-              {analytics.now_on_cart > 0 && (
-                <div className="flex items-center gap-1">
-                  <ShoppingCart size={11} className="text-amber-500" />
-                  <span className="text-xs font-bold text-amber-600">{analytics.now_on_cart}</span>
-                  <span className="text-[10px] text-zinc-400 hidden sm:inline">carrinho</span>
-                </div>
-              )}
-              {analytics.now_on_checkout > 0 && (
-                <div className="flex items-center gap-1">
-                  <LogIn size={11} className="text-blue-500" />
-                  <span className="text-xs font-bold text-blue-600">{analytics.now_on_checkout}</span>
-                  <span className="text-[10px] text-zinc-400 hidden sm:inline">checkout</span>
-                </div>
-              )}
-            </div>
-
-            {/* Divider */}
-            <div className="w-px h-5 bg-zinc-100 shrink-0" />
-
-            {/* Historic summary */}
-            <div className="flex items-center gap-3 shrink-0 text-[10px]">
-              <div className="text-center">
-                <p className="font-bold text-zinc-700 text-xs">{analytics.unique_today}</p>
-                <p className="text-zinc-400">hoje</p>
-              </div>
-              <div className="text-center">
-                <p className="font-bold text-zinc-700 text-xs">{analytics.unique_week}</p>
-                <p className="text-zinc-400">sem</p>
-              </div>
-              <div className="text-center">
-                <p className="font-bold text-zinc-700 text-xs">{analytics.unique_month}</p>
-                <p className="text-zinc-400">mes</p>
-              </div>
-            </div>
+            )}
+            {analytics.now_on_checkout > 0 && (
+              <span className="flex items-center text-[11px] font-bold text-blue-500">
+                <LogIn size={12} className="mr-1" /> {analytics.now_on_checkout} no checkout
+              </span>
+            )}
           </div>
         </div>
       )}
 
-      {/* ============ REVENUE CARD ============ */}
-      <div className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 space-y-4">
-        {/* Period Selector */}
-        <div className="flex gap-1.5 bg-zinc-100 p-1 rounded-xl">
+      {/* ============ 2. CARTÃO FINANCEIRO (O CLÁSSICO BRANCO) ============ */}
+      <div className="bg-white rounded-2xl border border-zinc-100 p-5 shadow-sm space-y-5">
+        
+        {/* Seletor de Período Grande e Claro */}
+        <div className="flex bg-zinc-100 p-1 rounded-xl">
           {(['today', 'week', 'month'] as Period[]).map(p => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
-                period === p
-                  ? 'bg-white text-zinc-900 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700'
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                period === p ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-600'
               }`}
             >
               {periodLabels[p]}
@@ -202,111 +142,113 @@ export default function AdminDashboard() {
           ))}
         </div>
 
-        {/* 3 Financial Values */}
-        <div className="space-y-3">
-          <div className="text-center pb-3 border-b border-zinc-100">
-            <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1">
-              <CreditCard size={10} /> Recebido (pagos)
+        {/* Métrica Central: Recebido */}
+        <div className="text-center pb-4 border-b border-zinc-100">
+          <p className="text-[11px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1.5 mb-1">
+            <CreditCard size={14} /> Recebido (Pagos)
+          </p>
+          <p className="text-4xl font-black text-zinc-900 tracking-tight">
+            R$ {formatCurrency(recebido)}
+          </p>
+          <p className="text-[11px] text-zinc-400 font-medium mt-1">
+            {paidCount} {paidCount === 1 ? 'pedido pago' : 'pedidos pagos'}
+          </p>
+        </div>
+
+        {/* Métricas Secundárias */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="text-center">
+            <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center justify-center gap-1 mb-1">
+              <Clock size={12} /> Aguardando
             </p>
-            <p className="text-3xl sm:text-4xl font-black text-zinc-900 tracking-tight mt-1">
-              R$ {formatCurrency(recebido)}
+            <p className="text-xl font-black text-zinc-900">
+              R$ {formatCurrency(aguardando)}
             </p>
-            <p className="text-[10px] text-zinc-400 mt-0.5">
-              {paidCount} pedido{paidCount !== 1 ? 's' : ''} pago{paidCount !== 1 ? 's' : ''}
+            <p className="text-[10px] text-zinc-400 font-medium">
+              {awaitingCount} unid.
             </p>
           </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="text-center">
-              <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest flex items-center justify-center gap-1">
-                <Clock size={10} /> Aguardando
-              </p>
-              <p className="text-lg sm:text-xl font-black text-zinc-900 mt-0.5">
-                R$ {formatCurrency(aguardando)}
-              </p>
-              <p className="text-[10px] text-zinc-400">
-                {awaitingCount} pedido{awaitingCount !== 1 ? 's' : ''}
-              </p>
-            </div>
-            <div className="text-center border-l border-zinc-100">
-              <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest flex items-center justify-center gap-1">
-                <DollarSign size={10} /> Potencial total
-              </p>
-              <p className="text-lg sm:text-xl font-black text-zinc-900 mt-0.5">
-                R$ {formatCurrency(potencialTotal)}
-              </p>
-              <p className="text-[10px] text-zinc-400">
-                {paidCount + awaitingCount} pedido{(paidCount + awaitingCount) !== 1 ? 's' : ''}
-              </p>
-            </div>
+          <div className="text-center border-l border-zinc-100">
+            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest flex items-center justify-center gap-1 mb-1">
+              <DollarSign size={12} /> Potencial
+            </p>
+            <p className="text-xl font-black text-zinc-900">
+              R$ {formatCurrency(potencialTotal)}
+            </p>
+            <p className="text-[10px] text-zinc-400 font-medium">
+              Total
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ============ QUICK ACCESS BLOCKS ============ */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-        {/* Orders Block */}
-        <button
+      {/* ============ 3. TRÁFEGO HISTÓRICO ============ */}
+      {analytics && (
+        <div className="flex justify-between items-center bg-white border border-zinc-100 rounded-xl px-5 py-4 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Users size={16} className="text-zinc-400" />
+            <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Visitas Únicas</span>
+          </div>
+          <div className="flex gap-5 text-right">
+            <div>
+              <p className="text-sm font-black text-zinc-900">{analytics.unique_today}</p>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase">Hoje</p>
+            </div>
+            <div>
+              <p className="text-sm font-black text-zinc-900">{analytics.unique_week}</p>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase">Sem</p>
+            </div>
+            <div>
+              <p className="text-sm font-black text-zinc-900">{analytics.unique_month}</p>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase">Mês</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ 4. ATALHOS RÁPIDOS (Estilo Lista iOS) ============ */}
+      <div className="bg-white border border-zinc-100 rounded-2xl overflow-hidden shadow-sm flex flex-col">
+        
+        {/* Item: Pedidos */}
+        <button 
           onClick={() => navigate('/store/admin/pedidos')}
-          className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 text-left hover:border-zinc-300 hover:shadow-sm transition-all group"
+          className="flex items-center p-4 gap-4 hover:bg-zinc-50 active:bg-zinc-100 transition-colors border-b border-zinc-50 text-left"
         >
-          <div className="flex items-start justify-between mb-3">
-            <div className="w-9 h-9 bg-amber-50 rounded-xl flex items-center justify-center">
-              <Package size={18} className="text-amber-600" />
-            </div>
-            <ArrowRight size={16} className="text-zinc-300 group-hover:text-zinc-500 transition-colors mt-1" />
+          <div className="w-11 h-11 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
+            <Package size={22} className="text-amber-600" />
           </div>
-          <h3 className="font-bold text-zinc-900 text-sm mb-2">Pedidos</h3>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-xs">
-              <Clock size={12} className="text-amber-500 shrink-0" />
-              <span className="text-zinc-500">
-                Pendentes (48h): <span className="font-bold text-zinc-700">{pending48h}</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <CreditCard size={12} className="text-emerald-500 shrink-0" />
-              <span className="text-zinc-500">
-                Pagos (48h): <span className="font-bold text-zinc-700">{paid48h}</span>
-              </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[15px] font-bold text-zinc-900">Gerenciar Pedidos</p>
+            <div className="flex gap-2 mt-1">
+              <span className="text-[11px] font-semibold text-zinc-500">Pendentes (48h): <span className="text-amber-600">{pending48h}</span></span>
+              <span className="text-zinc-300 text-[11px]">•</span>
+              <span className="text-[11px] font-semibold text-zinc-500">Pagos (48h): <span className="text-emerald-600">{paid48h}</span></span>
             </div>
           </div>
-          <p className="text-[11px] text-zinc-400 font-medium mt-3 group-hover:text-zinc-600 transition-colors">
-            Gerenciar →
-          </p>
+          <ChevronRight size={20} className="text-zinc-300" />
         </button>
 
-        {/* Products Block */}
-        <button
+        {/* Item: Produtos */}
+        <button 
           onClick={() => navigate('/store/admin/produtos')}
-          className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 text-left hover:border-zinc-300 hover:shadow-sm transition-all group"
+          className="flex items-center p-4 gap-4 hover:bg-zinc-50 active:bg-zinc-100 transition-colors text-left"
         >
-          <div className="flex items-start justify-between mb-3">
-            <div className="w-9 h-9 bg-emerald-50 rounded-xl flex items-center justify-center">
-              <ShoppingBag size={18} className="text-emerald-600" />
-            </div>
-            <ArrowRight size={16} className="text-zinc-300 group-hover:text-zinc-500 transition-colors mt-1" />
+          <div className="w-11 h-11 bg-emerald-50 rounded-xl flex items-center justify-center shrink-0">
+            <ShoppingBag size={22} className="text-emerald-600" />
           </div>
-          <h3 className="font-bold text-zinc-900 text-sm mb-2">Produtos</h3>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-xs">
-              <TrendingUp size={12} className="text-emerald-500 shrink-0" />
-              <span className="text-zinc-500">
-                Publicados: <span className="font-bold text-zinc-700">{publishedCount}</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <Package size={12} className="text-zinc-400 shrink-0" />
-              <span className="text-zinc-500">
-                Rascunho: <span className="font-bold text-zinc-700">{draftCount}</span>
-              </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[15px] font-bold text-zinc-900">Gerenciar Produtos</p>
+            <div className="flex gap-2 mt-1">
+              <span className="text-[11px] font-semibold text-zinc-500">Publicados: <span className="text-emerald-600">{publishedCount}</span></span>
+              <span className="text-zinc-300 text-[11px]">•</span>
+              <span className="text-[11px] font-semibold text-zinc-500">Rascunhos: <span className="text-zinc-600">{draftCount}</span></span>
             </div>
           </div>
-          <p className="text-[11px] text-zinc-400 font-medium mt-3 group-hover:text-zinc-600 transition-colors">
-            Gerenciar →
-          </p>
+          <ChevronRight size={20} className="text-zinc-300" />
         </button>
+
       </div>
+
     </div>
   );
 }

@@ -677,8 +677,36 @@ function ProductEditor({ product, allGroups, onSave, onClose, saving }: {
                     />
                   </div>
                 </div>
+                {/* Weight plausibility warning: for multi-unit packs (e.g. "48 UNIDADES ..."),
+                    the weight must grow with the unit count. A pack with 48 items cadastred
+                    as 1 kg is almost certainly wrong and will make the SuperFrete quote look
+                    flat at low weights (PAC minimum price zone). */}
+                {(() => {
+                  const m = title?.match(/([0-9]+)\s*UNIDADES?/i);
+                  const unidades = m ? parseInt(m[1], 10) : 1;
+                  const peso = Number(shWeight) || 0;
+                  if (unidades < 2 || peso <= 0) return null;
+                  const pesoPorUnidade = peso / unidades;
+                  // Typical cadastro: >= 0.04 kg per unit (40g). Below that is suspicious.
+                  if (pesoPorUnidade < 0.04) {
+                    return (
+                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
+                        <Info size={14} className="shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Peso suspeito:</strong> {unidades} unidades com apenas {peso} kg
+                          ({(pesoPorUnidade * 1000).toFixed(1)} g por unidade).
+                          Verifique se o peso está correto — pesos abaixo de 40 g/unidade fazem o frete
+                          praticamente não aumentar quando o cliente adiciona mais pacotes
+                          (zona de preço mínimo do PAC).
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
                 <p className="text-[10px] text-zinc-400 flex items-center gap-1">
-                  <Info size={10} /> Estas dimensoes sao usadas pelo SuperFrete para calcular o frete
+                  <Info size={10} /> Estas dimensoes sao usadas pelo SuperFrete para calcular o frete.
+                  Para pacotes com multiplas unidades, pese o pacote completo (nao a unidade).
                 </p>
               </div>
             </div>

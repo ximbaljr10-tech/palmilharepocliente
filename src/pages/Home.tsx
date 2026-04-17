@@ -136,12 +136,56 @@ function LoadingSplash() {
   );
 }
 
+/* AdSenseBanner — slot do catálogo completo (Home).
+ * 2026-04-17: garantido label "Publicidade" (política AdSense) e parent
+ * sem overflow/altura fixa. O script do AdSense já é carregado globalmente
+ * pelo index.html, mas mantemos o fallback defensivo aqui.
+ */
+function AdSenseBanner() {
+  const insRef = useRef<HTMLModElement>(null);
+
+  useEffect(() => {
+    // Fallback: injeta o script apenas se, por algum motivo, não estiver presente.
+    if (!document.querySelector('script[src*="adsbygoogle"]')) {
+      const script = document.createElement('script');
+      script.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2374693914602514';
+      script.async = true;
+      script.crossOrigin = 'anonymous';
+      document.head.appendChild(script);
+    }
+
+    const timer = setTimeout(() => {
+      try {
+        ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({});
+      } catch (_) {}
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="my-4 w-full">
+      <p className="text-center text-[10px] font-medium tracking-widest uppercase text-zinc-400 mb-1.5">Publicidade</p>
+      <ins
+        ref={insRef}
+        className="adsbygoogle"
+        style={{ display: 'block', width: '100%' }}
+        data-ad-client="ca-pub-2374693914602514"
+        data-ad-slot="8543863718"
+        data-ad-format="auto"
+        data-full-width-responsive="true"
+      />
+    </div>
+  );
+}
+
 export default function Home() {
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [yardsOptions, setYardsOptions] = useState<number[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedYards, setSelectedYards] = useState<string>('3000');
+  // Catálogo completo: filtro inicial "Todas" (sem pré-filtro por jardas).
+  const [selectedYards, setSelectedYards] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(50);
   const [totalServerCount, setTotalServerCount] = useState(0);
@@ -226,7 +270,7 @@ export default function Home() {
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-500">
-      {/* Banner */}
+      
       <div className="w-[99%] md:w-[80%] mx-auto">
         <img
           src="/banner-chefao.png"
@@ -235,6 +279,10 @@ export default function Home() {
           loading="eager"
         />
       </div>
+      {/* AdSense — topo da home */}
+      <AdSenseBanner />
+
+      {/* Banner */}
 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

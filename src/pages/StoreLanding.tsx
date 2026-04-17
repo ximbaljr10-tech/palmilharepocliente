@@ -1,340 +1,324 @@
 /**
- * StoreLanding.tsx — NOVA PÁGINA DE ENTRADA (teste de UX)
+ * StoreLanding.tsx — v4
+ * AdSense slot: 2918102134
  *
- * Rota: /store/nova-home
- * Objetivo: testar uma nova experiência de entrada mobile-first,
- *           SEM substituir a home atual (/store → Home.tsx).
- *
- * Esta página NÃO substitui Home.tsx.
- * Esta página NÃO é carregada por padrão.
- * Ela existe apenas para testes manuais via URL direta.
- *
- * Criada em: 2026-04-12
+ * Banners de categoria: INALTERADOS visualmente
+ * UX hint: embutido no subtitle "Linhas Profissionais" — sem elemento extra
+ * Produtos: line-clamp-3 + fonte menor → nome completo visível
+ * Anúncios: a cada 6 produtos no catálogo completo
  */
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, ShoppingBag, Loader2, HelpCircle, ChevronRight, Star, Megaphone } from 'lucide-react';
-import { Product } from '../types';
+import { Product, needsColorSelection } from '../types';
 import { useCart } from '../CartContext';
 import { api } from '../api';
+import { Loader2, BookOpen, ArrowRight, Flame, Medal, TrendingUp, ChevronRight } from 'lucide-react';
 
-const LOGO_URL =
-  'https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0';
+const LOGO_URL = "https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0";
 
-/* ─── Yard option buttons ─── */
-const YARD_OPTIONS = [200, 500, 1000, 3000, 6000, 12000] as const;
+/* ─── ProductCard ─ */
+interface ProductCardProps { product: Product; rank?: number; isTrending?: boolean; }
 
-/* ─── Mini product card used in the "Mais vendidos" section ─── */
-const MiniProductCard: React.FC<{ product: Product }> = ({ product }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ product, rank, isTrending }) => {
+  const { addToCart } = useCart();
   const navigate = useNavigate();
+  const [isAdding, setIsAdding] = useState(false);
+  const [showCheck, setShowCheck] = useState(false);
+  const requiresColor = needsColorSelection(product);
+
+  const handleBuy = () => {
+    if (requiresColor) { navigate(`/store/product/${product.id}`); return; }
+    if (isAdding) return;
+    setIsAdding(true);
+    addToCart(product);
+    setTimeout(() => { setShowCheck(true); setTimeout(() => { setShowCheck(false); setIsAdding(false); }, 800); }, 200);
+  };
 
   return (
-    <button
-      onClick={() => navigate(`/store/product/${product.id}`)}
-      className="flex-shrink-0 w-36 sm:w-44 bg-white rounded-2xl shadow-sm border border-zinc-100 overflow-hidden text-left hover:shadow-md transition-shadow snap-start"
-    >
-      <div className="aspect-square bg-zinc-100 overflow-hidden">
-        {product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.title}
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-zinc-300 text-xs">
-            Sem foto
+    <div className="relative bg-white rounded-xl border border-zinc-200 overflow-hidden flex flex-col group transition-all duration-200 hover:shadow-lg hover:border-red-100">
+      <div className="absolute top-0 left-0 w-full h-[2px] bg-red-600 z-10 scale-x-0 group-hover:scale-x-100 origin-left transition-transform duration-300" />
+      {rank && (
+        <div className="absolute top-2 left-2 z-20 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow flex items-center gap-1 uppercase tracking-wide">
+          {rank === 1 ? <Medal size={12} /> : <Flame size={12} />} TOP {rank}
+        </div>
+      )}
+      {!rank && isTrending && (
+        <div className="absolute top-2 left-2 z-20 bg-zinc-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow flex items-center gap-1 uppercase tracking-wide">
+          <TrendingUp size={12} className="text-red-500" /> Em Alta
+        </div>
+      )}
+      <Link to={`/store/product/${product.id}`} className="aspect-square bg-zinc-50 overflow-hidden relative">
+        {product.image_url
+          ? <img src={product.image_url} alt={product.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" referrerPolicy="no-referrer" loading="lazy" />
+          : <div className="w-full h-full flex items-center justify-center text-zinc-300 text-xs">Sem imagem</div>
+        }
+        {isAdding && (
+          <div className="absolute inset-0 bg-red-600/10 backdrop-blur-[2px] flex items-center justify-center z-30">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ${showCheck ? 'bg-red-600 scale-100' : 'bg-red-600/80 scale-75'}`}>
+              {showCheck
+                ? <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                : <Loader2 size={20} className="text-white animate-spin" />
+              }
+            </div>
           </div>
         )}
-      </div>
-      <div className="p-2.5">
-        <p className="text-xs font-medium text-zinc-800 line-clamp-2 leading-snug">
+      </Link>
+      <div className="p-2.5 sm:p-3 flex flex-col flex-grow bg-white relative z-10">
+        <Link to={`/store/product/${product.id}`} title={product.title}
+          className="text-[11px] sm:text-xs font-semibold text-zinc-800 hover:text-red-600 line-clamp-3 mb-2 leading-snug transition-colors">
           {product.title}
-        </p>
-        <p className="mt-1.5 text-sm font-bold text-zinc-900">
-          R$ {product.price.toFixed(2).replace('.', ',')}
-        </p>
+        </Link>
+        <div className="mt-auto">
+          <span className="block text-sm sm:text-base font-black text-zinc-900 mb-1.5">
+            R$ {product.price.toFixed(2).replace('.', ',')}
+          </span>
+          <button onClick={handleBuy} disabled={isAdding}
+            className={`w-full py-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center gap-1.5 border ${isAdding ? 'bg-red-600 border-red-600 text-white' : 'border-zinc-200 text-zinc-800 hover:border-red-600 hover:bg-red-50 hover:text-red-600 active:scale-95'}`}>
+            {showCheck
+              ? <><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Foi!</>
+              : isAdding ? <Loader2 size={14} className="animate-spin" />
+              : requiresColor ? 'Ver Cores' : 'Comprar'
+            }
+          </button>
+        </div>
       </div>
-    </button>
+    </div>
   );
 };
 
-/* ─── Main component ─── */
+/* ─── LoadingSplash ─ */
+function LoadingSplash() {
+  const slogans = ["Preparando as melhores linhas…", "Linha Dente de Tubarão — resistência que você confia!", "Selecionando os melhores produtos…", "A linha que não te deixa na mão!"];
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { const t = setInterval(() => setIdx(i => (i + 1) % slogans.length), 2500); return () => clearInterval(t); }, []);
+  return (
+    <div className="flex flex-col items-center justify-center py-24 space-y-8">
+      <div className="animate-pulse">
+        <img src={LOGO_URL} alt="Dente de Tubarão" className="h-20 sm:h-28 object-contain drop-shadow-lg" referrerPolicy="no-referrer" />
+      </div>
+      <div className="w-64 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+        <div className="h-full bg-red-600 rounded-full animate-loading-bar" />
+      </div>
+      <p className="text-zinc-500 text-center text-sm font-medium max-w-xs" key={idx}>{slogans[idx]}</p>
+    </div>
+  );
+}
+
+/* ─── Categorias (banners) — INALTERADO visualmente ─
+   UX hint embutido no subtitle de "Linhas Profissionais"
+   sem nenhum elemento externo extra
+─ */
+const RIBBON_CATEGORIES = [
+  {
+    label: 'Linhas Profissionais',
+    // Hint de ação direto no subtitle — já está no banner, sem poluir
+    subtitle: 'Toque aqui → escolha o tamanho em jardas',
+    to: '/store/nova-home/jardas',
+    bgImage: 'https://i.postimg.cc/nhmyCSZZ/Captura-de-tela-2026-04-13-004937.png',
+  },
+  {
+    label: 'Carretilhas',
+    subtitle: 'As melhores do mercado',
+    to: '/store/nova-home/carretilhas',
+    bgImage: 'https://i.postimg.cc/Rh3P2qZw/Captura-de-tela-2026-04-13-005046.png',
+  },
+  {
+    label: 'Roupas e Acessórios',
+    subtitle: 'Camisas, bonés e mais',
+    to: '/store/nova-home/roupas-acessorios',
+    bgImage: 'https://i.postimg.cc/fbDMZQX3/Captura-de-tela-2026-04-13-010217.png',
+  },
+];
+
+/* ─── AdSenseBanner ─
+ * 2026-04-17: "libertado" do container. O AdSense responsive ads precisa medir
+ * o parent LIVRE para decidir formato/altura. Qualquer `overflow-hidden`,
+ * `min-height` fixa ou padding/border em volta aprisiona o ad (força o Google
+ * a servir apenas banners pequenos). Mantemos somente o label "Publicidade",
+ * que É recomendado pela política do AdSense (ads precisam estar claramente
+ * identificados como publicidade). Nada de bg/border que simule um card.
+ */
+const AdSenseBanner: React.FC = () => {
+  useEffect(() => {
+    try { ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({}); } catch (_) {}
+  }, []);
+  return (
+    <div className="my-4 w-full">
+      <p className="text-center text-[10px] font-medium tracking-widest uppercase text-zinc-400 mb-1.5">Publicidade</p>
+      <ins
+        className="adsbygoogle"
+        style={{ display: 'block', width: '100%' }}
+        data-ad-client="ca-pub-2374693914602514"
+        data-ad-slot="2918102134"
+        data-ad-format="auto"
+        data-full-width-responsive="true"
+      />
+    </div>
+  );
+};
+
+/* ─── Grid com anúncios a cada 6 produtos ─ */
+const CHUNK = 6;
+function ProductGridWithAds({ products }: { products: Product[] }) {
+  const nodes: React.ReactNode[] = [];
+  for (let i = 0; i < products.length; i += CHUNK) {
+    nodes.push(
+      <div key={`c-${i}`} className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+        {products.slice(i, i + CHUNK).map(p => <ProductCard key={p.id} product={p} />)}
+      </div>
+    );
+    if (i + CHUNK < products.length) nodes.push(<AdSenseBanner key={`ad-${i}`} />);
+  }
+  return <>{nodes}</>;
+}
+
+/* ─── StoreLanding ─ */
 export default function StoreLanding() {
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const navigate = useNavigate();
+  const [visibleCount, setVisibleCount] = useState(50);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  /* Load products once */
   useEffect(() => {
-    document.title = 'Dente de Tubarao — Entrada Nova (Teste UX)';
+    document.title = "Dente de Tubarão — Linhas de Pipa de Alta Performance | Loja Oficial";
     (async () => {
       try {
         const res = await api.getProducts(300, 0);
         const all = res.products.filter((p: Product) => !p.title.startsWith('Medusa '));
-        setProducts(all);
-      } catch (err) {
-        console.error('StoreLanding: erro ao carregar produtos', err);
-      } finally {
-        setLoading(false);
-      }
+        setAllProducts(all); setProducts(all);
+      } catch (e) { console.error(e); }
+      finally { setLoading(false); }
     })();
   }, []);
 
-  /* Best sellers: top 8 cheapest products from the most popular yard (3000) */
   const bestSellers = React.useMemo(() => {
-    const popular = products.filter((p) => p.yards === 3000);
-    if (popular.length >= 4) return popular.slice(0, 8);
-    // Fallback: any first 8 products
-    return products.slice(0, 8);
-  }, [products]);
+    const pop = allProducts.filter(p => p.yards === 3000);
+    return (pop.length >= 4 ? pop : allProducts).slice(0, 12);
+  }, [allProducts]);
 
-  /* Navigate when searching */
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    // Navigate to the main store with search term (existing flow)
-    navigate(`/store?q=${encodeURIComponent(searchQuery.trim())}`);
+  const visibleProducts = products.slice(0, visibleCount);
+  const hasMore = visibleCount < products.length;
+
+  const handleShowMore = () => {
+    setLoadingMore(true);
+    setTimeout(() => { setVisibleCount(v => v + 50); setLoadingMore(false); }, 100);
   };
 
-  /* Navigate to main store filtered by yard */
-  const handleYardClick = (yard: number) => {
-    // Uses existing /store page which already supports yards filter
-    navigate(`/store`);
-    // Note: The existing Home.tsx doesn't support URL query params for yard
-    // For now, navigating to /store. In the future a dedicated yard page
-    // can be created at /store/jardas/:yard
-  };
-
-  /* ─── Loading state ─── */
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 space-y-6 animate-fade-in">
-        <img
-          src={LOGO_URL}
-          alt="Dente de Tubarao"
-          className="h-16 sm:h-20 object-contain animate-pulse"
-          referrerPolicy="no-referrer"
-        />
-        <div className="w-48 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-red-600 via-emerald-500 to-red-600 rounded-full animate-loading-bar" />
-        </div>
-        <p className="text-zinc-400 text-sm">Carregando vitrine...</p>
-      </div>
-    );
-  }
+  if (loading) return <LoadingSplash />;
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* ═══════════════════════════════════════════════════════
-          1. BANNER PRINCIPAL — altura controlada, impacto visual
-          ═══════════════════════════════════════════════════════ */}
-      <section className="relative w-full overflow-hidden rounded-2xl shadow-md">
-        <img
-          src="/banner-chefao.png"
-          alt="Testado e Aprovado - Chefao da Diamante Pipas usa Dente de Tubarao"
-          className="w-full h-40 sm:h-52 md:h-60 object-cover"
-          loading="eager"
-        />
-        {/* Gradient overlay for readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-        <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between">
-          <div>
-            <p className="text-white font-bold text-base sm:text-lg drop-shadow-lg leading-tight">
-              Linhas de Pipa
-            </p>
-            <p className="text-white/80 text-xs sm:text-sm drop-shadow">
-              Alta performance para quem leva a sério
-            </p>
-          </div>
-          <img
-            src={LOGO_URL}
-            alt="Logo"
-            className="h-8 sm:h-10 object-contain drop-shadow-lg"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-      </section>
+    <div className="space-y-8 sm:space-y-10 animate-in fade-in duration-500 pb-10">
 
-      {/* ═══════════════════════════════════════════════════════
-          2. MAIS VENDIDOS — produtos visíveis cedo (horizontal scroll)
-          ═══════════════════════════════════════════════════════ */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-zinc-900 flex items-center gap-2">
-            <Star size={18} className="text-amber-500" />
-            Mais vendidos
+      {/* 1. Banner principal */}
+      <div className="w-[99%] md:w-[80%] mx-auto">
+        <img src="/banner-chefao.png" alt="Testado e Aprovado — Chefão da Diamante Pipas usa e recomenda Dente de Tubarão"
+          className="w-full rounded-2xl shadow-xl border border-zinc-100" loading="eager" />
+      </div>
+
+      {/* 2. Anúncio pós-banner */}
+      <div className="w-[99%] md:w-[80%] mx-auto">
+        <AdSenseBanner />
+      </div>
+
+      {/* 3. Escolha rápida — banners INALTERADOS visualmente */}
+      <div className="px-2 sm:px-0">
+        <div className="text-center mb-8">
+          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 uppercase tracking-tight">
+            O que você busca hoje?
           </h2>
-          <Link
-            to="/store"
-            className="text-xs font-medium text-emerald-600 hover:text-emerald-700 flex items-center gap-0.5"
-          >
-            Ver todos <ChevronRight size={14} />
+          <div className="h-[3px] w-8 bg-red-600 mx-auto mt-2 rounded-full" />
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {RIBBON_CATEGORIES.map((cat) => (
+            <Link key={cat.label} to={cat.to}
+              className="relative group overflow-hidden rounded-2xl h-24 sm:h-32 flex flex-col justify-center px-6 sm:px-10 border border-zinc-100 shadow-sm transition-all duration-500 hover:shadow-xl hover:-translate-y-1 w-full bg-zinc-50">
+              <img src={cat.bgImage} alt={cat.label}
+                className="absolute inset-0 w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-700 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/30 to-transparent z-10" />
+              <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-600 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <div className="relative z-30 flex items-center justify-between w-full">
+                <div>
+                  <h3 className="text-white text-lg sm:text-xl font-black tracking-wide uppercase drop-shadow-md group-hover:text-red-500 transition-colors">
+                    {cat.label}
+                  </h3>
+                  <p className="text-zinc-300 text-xs sm:text-sm font-medium mt-0.5 opacity-80">
+                    {cat.subtitle}
+                  </p>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20 group-hover:bg-red-600 group-hover:border-red-600 group-hover:scale-110 transition-all duration-300">
+                  <ChevronRight size={18} />
+                </div>
+              </div>
+            </Link>
+          ))}
+
+          <Link to="/store/catalogo"
+            className="flex items-center justify-center gap-2 w-full py-4 mt-2 rounded-2xl border-2 border-zinc-200 text-zinc-400 font-bold text-xs uppercase tracking-[0.2em] transition-all duration-300 hover:border-zinc-900 hover:text-zinc-900 active:scale-[0.98]">
+            Explorar catálogo completo <ArrowRight size={15} />
           </Link>
         </div>
+      </div>
 
-        {bestSellers.length === 0 ? (
-          <p className="text-zinc-400 text-sm py-6 text-center">Nenhum produto disponivel.</p>
-        ) : (
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x snap-mandatory -mx-1 px-1">
-            {bestSellers.map((p) => (
-              <MiniProductCard key={p.id} product={p} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ═══════════════════════════════════════════════════════
-          3. ESCOLHA SUA JARDA — botoes grandes, compactos
-          ═══════════════════════════════════════════════════════ */}
-      <section className="bg-white rounded-2xl border border-zinc-100 p-4 sm:p-5 shadow-sm">
-        <h2 className="text-base font-bold text-zinc-900 mb-3">Escolha sua jarda</h2>
-
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          {YARD_OPTIONS.map((yard) => (
-            <button
-              key={yard}
-              onClick={() => handleYardClick(yard)}
-              className="bg-zinc-50 hover:bg-emerald-50 border border-zinc-200 hover:border-emerald-400 rounded-xl py-3 sm:py-3.5 text-center transition-all active:scale-95 group"
-            >
-              <span className="text-lg sm:text-xl font-bold text-zinc-800 group-hover:text-emerald-700 transition-colors">
-                {yard >= 1000 ? `${(yard / 1000).toFixed(0)}k` : yard}
-              </span>
-              <span className="block text-[10px] sm:text-xs text-zinc-400 group-hover:text-emerald-500 font-medium">
-                jardas
-              </span>
-            </button>
-          ))}
+      {/* 4. Mais vendidos */}
+      <div>
+        <div className="flex items-center gap-3 mb-5 px-1 sm:px-0">
+          <div className="w-1 h-6 bg-red-600 rounded-full" />
+          <h2 className="text-xl sm:text-2xl font-black tracking-tight text-zinc-900 uppercase">Mais Vendidos</h2>
         </div>
+        {bestSellers.length === 0
+          ? <div className="text-center py-12 text-zinc-500 bg-white rounded-xl border border-zinc-100">Nenhum produto encontrado.</div>
+          : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+              {bestSellers.map((p, i) => (
+                <ProductCard key={p.id} product={p} rank={i < 3 ? i + 1 : undefined} isTrending={i >= 3 && i < 6} />
+              ))}
+            </div>
+          )
+        }
+      </div>
 
-        {/* CTA "Nao sei qual escolher" */}
-        <button
-          onClick={() => {
-            // TODO: No futuro, levar para /store/guia-jardas ou seção de ajuda
-            // Por agora, navega para a loja principal
-            navigate('/store');
-          }}
-          className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-zinc-200 text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-all text-sm font-medium"
-        >
-          <HelpCircle size={16} />
-          Nao sei qual escolher
-        </button>
-      </section>
+      {/* 5. Anúncio entre seções */}
+      <AdSenseBanner />
 
-      {/* ═══════════════════════════════════════════════════════
-          4. BUSCA — campo acessivel sem poluir o topo
-          ═══════════════════════════════════════════════════════ */}
-      <section className="bg-white rounded-2xl border border-zinc-100 p-4 shadow-sm">
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
-            <input
-              type="text"
-              placeholder="Buscar linhas, carretilhas, acessorios..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm transition-all"
-            />
+      {/* 6. Catálogo completo com anúncios intercalados */}
+      {products.length > 0 && (
+        <div>
+          <div className="flex items-center gap-3 mb-5 px-1 sm:px-0">
+            <h2 className="text-lg sm:text-xl font-bold text-zinc-800">Todos os produtos</h2>
           </div>
-          <button
-            type="submit"
-            className="bg-zinc-900 text-white px-4 rounded-xl text-sm font-medium hover:bg-zinc-800 active:scale-95 transition-all shrink-0"
-          >
-            Buscar
-          </button>
-        </form>
-      </section>
 
-      {/* ═══════════════════════════════════════════════════════
-          5. CATEGORIAS RAPIDAS — acesso rapido a tipos de produto
-          ═══════════════════════════════════════════════════════ */}
-      <section className="grid grid-cols-2 gap-3">
-        <Link
-          to="/store"
-          className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl p-4 text-white shadow-sm hover:shadow-md transition-shadow"
-        >
-          <ShoppingBag size={20} className="mb-1.5 opacity-80" />
-          <p className="font-bold text-sm">Todas as Linhas</p>
-          <p className="text-[10px] opacity-70 mt-0.5">{products.length} produtos</p>
-        </Link>
-        <Link
-          to="/store/blog"
-          className="bg-gradient-to-br from-zinc-700 to-zinc-800 rounded-2xl p-4 text-white shadow-sm hover:shadow-md transition-shadow"
-        >
-          <Megaphone size={20} className="mb-1.5 opacity-80" />
-          <p className="font-bold text-sm">Blog e Dicas</p>
-          <p className="text-[10px] opacity-70 mt-0.5">Aprenda sobre linhas</p>
-        </Link>
-      </section>
+          <ProductGridWithAds products={visibleProducts} />
 
-      {/* ═══════════════════════════════════════════════════════
-          6. ESPACO PARA ANUNCIOS — estrutura preparada, sem conteudo real
-          ═══════════════════════════════════════════════════════ */}
-      {/* 
-        Placeholder para anuncio futuro.
-        Descomente o bloco abaixo quando houver conteudo de anuncio pronto.
-        Nao exibe nada por padrao para nao poluir a primeira dobra.
-      */}
-      {/*
-      <section className="bg-zinc-50 border border-zinc-200 border-dashed rounded-2xl p-4 text-center">
-        <p className="text-xs text-zinc-400">Espaco reservado para anuncios</p>
-      </section>
-      */}
-
-      {/* ═══════════════════════════════════════════════════════
-          AMOSTRA DE TODOS OS PRODUTOS — grid compacto
-          ═══════════════════════════════════════════════════════ */}
-      <section>
-        <h2 className="text-base font-bold text-zinc-900 mb-3">Explore nosso catalogo</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {products.slice(0, 12).map((product) => (
-            <Link
-              key={product.id}
-              to={`/store/product/${product.id}`}
-              className="bg-white rounded-xl border border-zinc-100 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="aspect-square bg-zinc-100 overflow-hidden">
-                {product.image_url ? (
-                  <img
-                    src={product.image_url}
-                    alt={product.title}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-zinc-300 text-xs">
-                    Sem foto
-                  </div>
-                )}
-              </div>
-              <div className="p-2.5">
-                <p className="text-xs font-medium text-zinc-800 line-clamp-2 leading-snug">
-                  {product.title}
-                </p>
-                <p className="mt-1 text-sm font-bold text-zinc-900">
-                  R$ {product.price.toFixed(2).replace('.', ',')}
-                </p>
-              </div>
-            </Link>
-          ))}
+          {hasMore && (
+            <div className="text-center pt-8">
+              <button onClick={handleShowMore} disabled={loadingMore}
+                className="bg-white border-2 border-zinc-900 text-zinc-900 px-8 py-3 rounded-xl font-black hover:bg-zinc-900 hover:text-white transition-all disabled:opacity-50 flex items-center gap-3 mx-auto uppercase tracking-wide text-sm">
+                {loadingMore && <Loader2 size={18} className="animate-spin" />}
+                Carregar mais ({products.length - visibleCount})
+              </button>
+            </div>
+          )}
         </div>
+      )}
 
-        {products.length > 12 && (
-          <div className="text-center mt-4">
-            <Link
-              to="/store"
-              className="inline-flex items-center gap-2 bg-zinc-900 text-white px-6 py-2.5 rounded-xl text-sm font-bold hover:bg-zinc-800 transition-colors"
-            >
-              Ver todos os produtos
-              <ChevronRight size={16} />
-            </Link>
+      {/* 7. Blog CTA */}
+      <div className="bg-gradient-to-br from-zinc-900 to-black rounded-3xl border border-zinc-800 p-8 sm:p-10 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-red-600/10 rounded-full blur-3xl" />
+        <div className="flex flex-col md:flex-row items-center gap-6 relative z-10">
+          <div className="w-14 h-14 bg-red-600 rounded-2xl flex items-center justify-center shrink-0 shadow-lg shadow-red-600/30">
+            <BookOpen size={28} className="text-white" />
           </div>
-        )}
-      </section>
+          <div className="flex-1 text-center md:text-left">
+            <h2 className="font-black text-white text-xl tracking-wide">Blog Oficial Dente de Tubarão</h2>
+            <p className="text-sm text-zinc-400 mt-1.5 max-w-xl">Dicas de como escolher a linha ideal por jardas, segurança no combate e segredos de alta performance.</p>
+          </div>
+          <Link to="/store/blog" className="bg-red-600 text-white px-7 py-3 rounded-xl font-black hover:bg-red-500 transition-colors shrink-0 shadow-md flex items-center gap-2 text-sm">
+            Ver Artigos <ArrowRight size={16} />
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

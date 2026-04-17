@@ -124,7 +124,13 @@ export const api = {
   getProducts: async (limit = 100, offset = 0) => {
     try {
       const data = await medusaStore(
-        `/store/products?limit=${limit}&offset=${offset}&region_id=${REGION_ID}&fields=*variants.calculated_price`
+        // IMPORTANT: Medusa v2 Storefront API omits `metadata` by default.
+        // Without `+metadata`, products arrive with metadata=null, which causes
+        // calculateShipping() to silently fall back to getShippingByYards()
+        // (e.g. 0.2 kg for 50-yard), so a 48-unit PACK (cadastrado como 1 kg)
+        // is quoted as 0.2 kg and the freight barely scales with quantity.
+        // See AUDIT 2026-04-17 / shipping bug.
+        `/store/products?limit=${limit}&offset=${offset}&region_id=${REGION_ID}&fields=*variants.calculated_price,+metadata`
       );
       return {
         products: (data.products || []).map(mapMedusaProduct),
@@ -139,7 +145,9 @@ export const api = {
   getProduct: async (id: string) => {
     try {
       const data = await medusaStore(
-        `/store/products/${id}?region_id=${REGION_ID}&fields=*variants.calculated_price`
+        // +metadata: ver comentário em getProducts() acima. Sem isso,
+        // todo cálculo de frete cai num fallback genérico de peso por yards.
+        `/store/products/${id}?region_id=${REGION_ID}&fields=*variants.calculated_price,+metadata`
       );
       return mapMedusaProduct(data.product);
     } catch (err) {
@@ -342,18 +350,40 @@ export const api = {
   },
 
   // ============ SHIPPING (SuperFrete via Medusa backend) ============
+  //
+  // AUDIT 2026-04-17: Ensures every product sent to the backend has:
+  //   - a numeric, positive quantity (>= 1)
+  //   - a numeric, positive weight/dimensions (falls back to a small default
+  //     only when absolutely nothing is available — never to a "free" parcel).
+  //
+  // The backend then re-sanitizes AGAIN (defense in depth) and forwards the
+  // parcel list to SuperFrete, which scales weight by quantity automatically.
   calculateShipping: async (cep: string, items: any[]) => {
     try {
       const products = items.map((item) => {
         const shipping = item.shipping || item.metadata || {};
+        // Be robust: accept either the normalized (`height`) or the legacy
+        // metadata (`shipping_height`) naming, coerce to number, enforce min.
+        const num = (v: any, min: number, fallback: number) => {
+          const n = Number(v);
+          if (!Number.isFinite(n) || n <= 0) return fallback;
+          return Math.max(min, n);
+        };
         return {
-          quantity: item.quantity,
-          height: shipping.shipping_height || shipping.height || 12,
-          width: shipping.shipping_width || shipping.width || 12,
-          length: shipping.shipping_length || shipping.length || 19,
-          weight: shipping.shipping_weight || shipping.weight || 0.3,
+          quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
+          height: num(shipping.shipping_height ?? shipping.height, 1, 12),
+          width:  num(shipping.shipping_width  ?? shipping.width,  1, 12),
+          length: num(shipping.shipping_length ?? shipping.length, 1, 19),
+          weight: num(shipping.shipping_weight ?? shipping.weight, 0.01, 0.3),
         };
       });
+
+      // Debug log (visible in browser devtools) — helps auditing quickly
+      if (typeof window !== "undefined" && (window as any).__DDT_DEBUG_SHIPPING__) {
+        // Enable with:  window.__DDT_DEBUG_SHIPPING__ = true
+        // eslint-disable-next-line no-console
+        console.log("[calculateShipping] →", { cep, products });
+      }
 
       const res = await fetch(`${MEDUSA_URL}/store/shipping-quote`, {
         method: "POST",
@@ -365,6 +395,12 @@ export const api = {
       });
 
       const data = await res.json();
+
+      if (typeof window !== "undefined" && (window as any).__DDT_DEBUG_SHIPPING__) {
+        // eslint-disable-next-line no-console
+        console.log("[calculateShipping] ←", data);
+      }
+
       return data;
     } catch (error) {
       console.error("Erro no cálculo de frete:", error);

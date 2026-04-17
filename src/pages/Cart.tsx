@@ -78,6 +78,14 @@ export default function Cart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setShippingOptions, setCartCep, setShippingCartFingerprint, setSelectedShipping]);
 
+  // ── Track whether CEP is complete and valid for button state ──
+  const cleanCepNow = cep.replace(/\D/g, '');
+  const isCepComplete = cleanCepNow.length === 8;
+  // Shipping is considered "fresh" only if we have options AND no staleness AND CEP matches
+  const isShippingFresh = shippingOptions.length > 0 && !isShippingStale && selectedShipping !== null && cartCep === cleanCepNow;
+  // Button should be disabled unless shipping is fresh and not loading
+  const shouldDisableProceed = loadingShipping || !isShippingFresh || !isCepComplete;
+
   // ── Auto-recalculate when cart changes and CEP is already filled ──
   // Use a debounce so rapid +/- clicks don't spam the API.
   const recalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -99,6 +107,32 @@ export default function Cart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartFingerprintNow]);
 
+  // ── Auto-calculate when CEP changes and becomes complete (8 digits) ──
+  const cepCalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevCepRef = useRef<string>('');
+
+  useEffect(() => {
+    const cleanCep = cep.replace(/\D/g, '');
+    // If CEP just became complete and differs from last calculated CEP
+    if (cleanCep.length === 8 && cleanCep !== prevCepRef.current && cart.length > 0) {
+      // Clear previous shipping error when trying a new CEP
+      setShippingError('');
+      if (cepCalcTimerRef.current) clearTimeout(cepCalcTimerRef.current);
+      cepCalcTimerRef.current = setTimeout(() => {
+        prevCepRef.current = cleanCep;
+        calculateShipping(cleanCep, cart);
+      }, 700); // 700ms debounce to avoid rapid API calls
+    }
+    // If CEP became incomplete, invalidate the previous ref so re-entering same CEP still triggers
+    if (cleanCep.length < 8) {
+      prevCepRef.current = '';
+    }
+    return () => {
+      if (cepCalcTimerRef.current) clearTimeout(cepCalcTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cep, cart.length]);
+
   // ── Manual "OK" button handler ─────────────────────────────────
   const handleCalculateShipping = () => calculateShipping(cep, cart);
 
@@ -111,13 +145,18 @@ export default function Cart() {
       setValidationMsg('loading');
       return;
     }
-    // No CEP
-    if (!cep.replace(/\D/g, '')) {
+    // No CEP or incomplete CEP
+    if (!isCepComplete) {
       setValidationMsg('cep');
       return;
     }
     // Shipping stale (cart changed after last quote)
     if (isShippingStale) {
+      setValidationMsg('stale');
+      return;
+    }
+    // CEP changed since last calc
+    if (cartCep !== cleanCepNow) {
       setValidationMsg('stale');
       return;
     }
@@ -272,7 +311,7 @@ export default function Cart() {
               </button>
             </div>
             
-            {shippingError && <p className="text-red-500 text-xs mt-2">{shippingError}</p>}
+            {shippingError && <p className="text-red-500 text-xs mt-2">CEP invalido. Verifique e tente novamente.</p>}
 
             {/* Recalculating indicator */}
             {loadingShipping && shippingOptions.length > 0 && (
@@ -384,10 +423,15 @@ export default function Cart() {
 
           <button
             onClick={handleProceed}
-            disabled={loadingShipping || isShippingStale}
+            disabled={shouldDisableProceed}
             className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loadingShipping || isShippingStale ? (
+            {loadingShipping ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 size={20} className="animate-spin" />
+                Calculando frete...
+              </span>
+            ) : isShippingStale ? (
               <span className="flex items-center justify-center gap-2">
                 <Loader2 size={20} className="animate-spin" />
                 Atualizando frete...

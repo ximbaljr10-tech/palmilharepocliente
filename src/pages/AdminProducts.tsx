@@ -453,7 +453,8 @@ export default function AdminProducts() {
 
       // Load products via Store API (works with publishable key, no admin session needed)
       do {
-        const res = await fetch(`${MEDUSA_URL}/store/products?limit=${limit}&offset=${offset}&region_id=${REGION_ID}&fields=*variants,*variants.calculated_price,*variants.prices`, {
+        // +metadata required so shipping_weight/height/width/length are available (see api.ts audit)
+        const res = await fetch(`${MEDUSA_URL}/store/products?limit=${limit}&offset=${offset}&region_id=${REGION_ID}&fields=*variants,*variants.calculated_price,*variants.prices,+metadata`, {
           headers: {
             'Content-Type': 'application/json',
             'x-publishable-api-key': PUBLISHABLE_KEY,

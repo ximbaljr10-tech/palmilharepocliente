@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronUp
 } from 'lucide-react';
 import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards } from './adminApi';
+import TrackingCodeDisplay from '../components/TrackingCodeDisplay';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -561,7 +562,7 @@ export default function AdminOrderDetail() {
       items.forEach((item: any) => {
         const qty = item.quantity || 1;
         for (let q = 0; q < qty; q++) {
-          expandedItems.push({ title: item.title || 'Produto', price: Number(item.price || 0) });
+          expandedItems.push({ title: item.title || 'Produto', price: Number(item.price || item.unit_price || 0) });
         }
       });
       const tableData = expandedItems.map((item, i) => [
@@ -1221,7 +1222,7 @@ export default function AdminOrderDetail() {
               cp.product_id === item.product_id || cp.variant_id === item.variant_id
             );
             const swapAllowed = canSwapItems(order);
-            // Prices in order items are in centavos
+            // Prices in order items are in REAIS (this system stores prices in reais, not centavos)
             const itemPrice = Number(item.price || item.unit_price || 0);
 
             return (
@@ -1744,17 +1745,8 @@ export default function AdminOrderDetail() {
           )}
         </div>
         {order.tracking_code && (
-          <div className="flex items-center gap-2 mt-2 text-sm">
-            <Truck size={14} className="text-blue-500" />
-            <span className="text-zinc-600">Rastreio:</span>
-            <a
-              href={`https://rastreamento.correios.com.br/app/index.php?objeto=${order.tracking_code}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono font-bold text-blue-600 underline"
-            >
-              {order.tracking_code}
-            </a>
+          <div className="mt-2">
+            <TrackingCodeDisplay trackingCode={order.tracking_code} variant="admin" />
           </div>
         )}
       </div>
