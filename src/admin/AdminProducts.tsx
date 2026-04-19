@@ -1,25 +1,29 @@
 // ============================================================================
-// AdminProducts.tsx — Refatoração mobile-first (2026-04-18)
+// AdminProducts.tsx — RESTRUCTURE v2 (mobile-first, 2026-04-18)
 // ----------------------------------------------------------------------------
-// Escopo: SOMENTE este arquivo foi reescrito.
-// NÃO alterados: Home, StoreLanding, Checkout, Cart, rotas públicas, backend
-// Medusa, APIs (src/api.ts), src/admin/adminApi.ts, src/types.ts, autenticação.
+// Arquitetura nova:
 //
-// Novidades:
-//  - Ranking de produto (metadata.rank) — menor = mais no topo.
-//  - Editor de produto reorganizado em blocos, mobile-first real.
-//  - Sistema de cores revisado: claramente oculto quando produto não usa cor.
-//  - Confirmação antes de ações destrutivas em massa.
-//  - Banner "Rascunho" no editor.
-//  - Ações bulk de cor pulam automaticamente produtos sem variação de cor.
-//  - Filtros novos: "Com rank", "Sem rank".
-//  - Ordenação da lista admin por rank opcional (toggle).
+//   [Header compacto]  <- busca + contador + "Novo"
+//        |
+//   [Pills de modo]    <- Lista | Ordenar (editor abre full-screen)
+//        |
+//   [Pills de grupo]   <- scroll horizontal, sempre visiveis
+//        |
+//   [Chip bar: status/filtros]
+//        |
+//   [Lista ou Modo Ordenar]
+//        |
+//   [Barra de acoes] (bottom sheet) quando ha selecao
 //
-// Compatibilidade: totalmente aditiva. metadata.rank é ignorado por quem não
-// usa. Para o ranking refletir na loja pública, basta ordenar produtos por
-// `p.metadata?.rank ?? Infinity` no código público (mudança mínima de 2 linhas
-// em YardCatalog.tsx / CategoryCatalog.tsx / StoreLanding.tsx quando o cliente
-// liberar essa alteração).
+// Editor: full-screen com ABAS HORIZONTAIS (Info / Imagens / Cores / Posicao /
+// Frete) — sem accordions empilhados.
+//
+// Modo Ordenar: lista reordenavel por botoes (topo/base + up/down) com preview
+// da ordem final (#1, #2, #3...). Usuario nao digita numeros — so reordena.
+// A ordem vira rank sequencial 1..N no metadata.rank.
+//
+// Escopo: SOMENTE este arquivo. Sem alterar api.ts, adminApi.ts, types.ts,
+// rotas publicas, backend Medusa.
 // ============================================================================
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
@@ -27,16 +31,16 @@ import {
   Search, Save, X, Loader2, RefreshCw, Palette, Plus, Minus,
   ChevronDown, ChevronRight, Check, CheckSquare, Square,
   Eye, EyeOff, Filter, Package, AlertTriangle,
-  MinusSquare, Globe, GlobeLock,
-  SlidersHorizontal,
-  ChevronUp, DollarSign, Ruler, Weight,
-  PlusCircle, Camera, Pencil, Info, Upload, ArrowLeft, ChevronLeft,
-  Folder, FolderPlus, TrendingUp, ArrowUpDown, Flag, Hash
+  Globe, GlobeLock, ArrowLeft, ChevronLeft, ChevronUp,
+  DollarSign, Ruler, PlusCircle, Camera, Pencil, Info,
+  Upload, Folder, FolderPlus, TrendingUp, ArrowUpDown, Flag, Hash,
+  MoreHorizontal, ArrowUp, ArrowDown, ListOrdered, LayoutGrid,
+  Trash2, Tag,
 } from 'lucide-react';
 import { adminFetch, MEDUSA_URL } from './adminApi';
 import {
-  LINE_COLORS, getColorsForProduct, getDefaultColorsForGroup,
-  getColorGroupName, needsColorSelection, SKIP_COLOR_YARDS
+  getDefaultColorsForGroup, getColorGroupName,
+  needsColorSelection, SKIP_COLOR_YARDS,
 } from '../types';
 
 // ============================================================================
@@ -83,11 +87,14 @@ interface ParsedProduct extends ProductData {
   _shippingWidth: number | null;
   _shippingLength: number | null;
   _shippingWeight: number | null;
-  _rank: number | null; // NEW: ranking manual (menor = mais no topo)
+  _rank: number | null;
 }
 
+type ViewMode = 'list' | 'reorder';
+type EditorTab = 'info' | 'images' | 'colors' | 'rank' | 'shipping';
+
 // ============================================================================
-// COLOR PALETTE (para UI do admin)
+// COLOR PALETTE
 // ============================================================================
 
 const ALL_COLORS: { name: string; hex: string }[] = [
@@ -111,7 +118,7 @@ function getColorHex(name: string): string {
 }
 
 // ============================================================================
-// SHIPPING DEFAULTS (mesmo que api.ts — mantido para coerência)
+// SHIPPING DEFAULTS
 // ============================================================================
 
 function getDefaultShipping(yards: number | null, title: string): { height: number; width: number; length: number; weight: number } {
@@ -210,7 +217,6 @@ function parseProduct(p: ProductData): ParsedProduct {
 
   const defaultShipping = getDefaultShipping(yards, title);
 
-  // NEW: Parse rank — aceita number, string numérica, ou null/undefined
   const rawRank = metadata.rank;
   const rank = (typeof rawRank === 'number' && !isNaN(rawRank))
     ? rawRank
@@ -259,48 +265,22 @@ function ColorDot({ name, hex, size = 'sm' }: { name: string; hex: string; size?
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  if (status === 'published') {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-        Publicado
-      </span>
-    );
-  }
+function StatusDot({ status }: { status: string }) {
+  const pub = status === 'published';
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">
-      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-      Rascunho
-    </span>
+    <span
+      className={`inline-block w-2 h-2 rounded-full shrink-0 ${pub ? 'bg-emerald-500' : 'bg-amber-500'}`}
+      title={pub ? 'Publicado' : 'Rascunho'}
+    />
   );
 }
 
-function ColorSourceBadge({ source }: { source: 'metadata' | 'derived' | 'none' }) {
-  if (source === 'metadata') {
-    return (
-      <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium border border-emerald-200/60" title="Cores salvas no admin">
-        Salvo
-      </span>
-    );
-  }
-  if (source === 'derived') {
-    return (
-      <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium border border-blue-200/60" title="Cores derivadas automaticamente da loja">
-        Auto
-      </span>
-    );
-  }
-  return null;
-}
-
-/** Badge com o rank atual do produto (número) */
-function RankBadge({ rank }: { rank: number | null }) {
+function RankPill({ rank }: { rank: number | null }) {
   if (rank === null) return null;
   return (
     <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gradient-to-r from-amber-50 to-yellow-50 text-amber-700 border border-amber-200/70"
-      title={`Posicao ${rank} (menor = mais no topo)`}
+      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 shrink-0"
+      title={`Posicao ${rank}`}
     >
       <TrendingUp size={9} />
       #{rank}
@@ -311,18 +291,20 @@ function RankBadge({ rank }: { rank: number | null }) {
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
   return (
     <div
-      className={`fixed bottom-4 left-3 right-3 sm:left-auto sm:right-4 sm:w-96 z-[100] rounded-2xl px-4 py-3 shadow-xl flex items-center gap-2 text-sm font-medium animate-slide-up-bar ${
+      className={`fixed bottom-4 left-3 right-3 sm:left-auto sm:right-4 sm:w-96 z-[120] rounded-2xl px-4 py-3 shadow-2xl flex items-center gap-2 text-sm font-medium ${
         type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
       }`}
+      role="status"
     >
       {type === 'success' ? <Check size={16} /> : <AlertTriangle size={16} />}
       <span className="flex-1 min-w-0 break-words">{message}</span>
-      <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg shrink-0"><X size={14} /></button>
+      <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg shrink-0" aria-label="Fechar">
+        <X size={14} />
+      </button>
     </div>
   );
 }
 
-/** Modal de confirmação (reutilizado em ações destrutivas) */
 function ConfirmModal({
   title, message, confirmLabel, cancelLabel = 'Cancelar', danger = false,
   onConfirm, onClose, loading = false,
@@ -337,7 +319,7 @@ function ConfirmModal({
   loading?: boolean;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/50 z-[90] flex items-end sm:items-center justify-center p-3" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-[110] flex items-end sm:items-center justify-center p-3" onClick={onClose}>
       <div
         className="bg-white rounded-2xl shadow-2xl w-full sm:max-w-sm overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -348,7 +330,7 @@ function ConfirmModal({
             {title}
           </h3>
         </div>
-        <div className="px-5 py-4 text-sm text-zinc-600 leading-relaxed">
+        <div className="px-5 py-4 text-sm text-zinc-600 leading-relaxed break-words">
           {message}
         </div>
         <div className="px-5 py-3 border-t border-zinc-100 flex gap-2">
@@ -417,7 +399,7 @@ async function uploadImageToMedusa(file: File): Promise<{ url: string }> {
 }
 
 function validateImageFile(file: File): string | null {
-  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+  const MAX_SIZE = 10 * 1024 * 1024;
   const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
   if (!ALLOWED_TYPES.includes(file.type)) {
     return `Tipo nao permitido: ${file.type}. Use JPG, PNG, WebP, GIF ou AVIF.`;
@@ -429,58 +411,122 @@ function validateImageFile(file: File): string | null {
 }
 
 // ============================================================================
-// COLLAPSIBLE SECTION (mobile-first: tudo em accordion)
+// FORM HELPERS
 // ============================================================================
 
-function Section({
-  title, icon, badge, defaultOpen = true, children,
+const INPUT_CLASS =
+  'w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white';
+
+function Field({
+  label, required, icon, children,
 }: {
-  title: string;
-  icon: React.ReactNode;
-  badge?: React.ReactNode;
-  defaultOpen?: boolean;
+  label: string;
+  required?: boolean;
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-zinc-50 transition-colors touch-manipulation"
-      >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-zinc-500 shrink-0">{icon}</span>
-          <h3 className="text-sm font-bold text-zinc-800 truncate">{title}</h3>
-          {badge}
-        </div>
-        <ChevronDown
-          size={18}
-          className={`text-zinc-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-      {open && (
-        <div className="px-4 pb-4 pt-1 space-y-3 border-t border-zinc-100">
-          {children}
-        </div>
-      )}
+    <div>
+      <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+        {icon}
+        {label}
+        {required && <span className="text-red-500">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function StatusButton({
+  active, onClick, variant,
+}: {
+  active: boolean;
+  onClick: () => void;
+  variant: 'pub' | 'draft';
+}) {
+  const cfg = variant === 'pub'
+    ? { label: 'Publicado', icon: <Eye size={14} />, activeClass: 'bg-emerald-600 text-white border-emerald-600' }
+    : { label: 'Rascunho',  icon: <EyeOff size={14} />, activeClass: 'bg-amber-500 text-white border-amber-500' };
+  return (
+    <button
+      onClick={onClick}
+      className={`flex-1 py-3 px-2 rounded-xl text-xs font-bold border transition-all min-w-0 flex items-center justify-center gap-1.5 ${
+        active ? cfg.activeClass + ' shadow-sm' : 'bg-white text-zinc-600 border-zinc-200'
+      }`}
+    >
+      {cfg.icon}
+      {cfg.label}
+    </button>
+  );
+}
+
+// ============================================================================
+// EDITOR TABS
+// ============================================================================
+
+function EditorTabs({
+  current, onChange, errors,
+}: {
+  current: EditorTab;
+  onChange: (t: EditorTab) => void;
+  errors: Partial<Record<EditorTab, boolean>>;
+}) {
+  const tabs: { id: EditorTab; label: string; icon: React.ReactNode }[] = [
+    { id: 'info',     label: 'Info',     icon: <Package size={14} /> },
+    { id: 'images',   label: 'Imagens',  icon: <Camera size={14} /> },
+    { id: 'colors',   label: 'Cores',    icon: <Palette size={14} /> },
+    { id: 'rank',     label: 'Posicao',  icon: <TrendingUp size={14} /> },
+    { id: 'shipping', label: 'Frete',    icon: <Ruler size={14} /> },
+  ];
+  return (
+    <div
+      className="flex gap-1 overflow-x-auto scrollbar-hide px-2 py-2 bg-zinc-50 border-b border-zinc-200"
+      role="tablist"
+    >
+      {tabs.map(t => {
+        const active = current === t.id;
+        const hasError = errors[t.id];
+        return (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.id)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all relative ${
+              active
+                ? 'bg-white text-blue-700 border border-blue-200 shadow-sm'
+                : 'bg-transparent text-zinc-500 hover:bg-white/60 hover:text-zinc-700'
+            }`}
+          >
+            {t.icon}
+            {t.label}
+            {hasError && (
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500" />
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 // ============================================================================
-// FULL-SCREEN PRODUCT EDITOR — mobile-first real (accordions, 1 coluna)
+// PRODUCT EDITOR — full-screen com abas horizontais
 // ============================================================================
 
 function ProductEditor({
   product, allGroups, onSave, onClose, saving,
 }: {
-  product: ParsedProduct | null; // null = novo produto
+  product: ParsedProduct | null;
   allGroups: string[];
   onSave: (data: any) => void;
   onClose: () => void;
   saving: boolean;
 }) {
   const isNew = !product;
+
+  const [tab, setTab] = useState<EditorTab>('info');
+
   const [title, setTitle] = useState(product?.title || '');
   const [handle, setHandle] = useState(product?.handle || '');
   const [description, setDescription] = useState(product?.description || '');
@@ -495,34 +541,36 @@ function ProductEditor({
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Grupo
   const [grupo, setGrupo] = useState(product?.metadata?.grupo || product?._group || '');
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
 
-  // Ranking (NOVO)
   const [rank, setRank] = useState<string>(
     product?._rank !== null && product?._rank !== undefined ? String(product._rank) : ''
   );
 
-  // Cores
   const needsColorFromProduct = product ? product._needsColorSelection : false;
   const [colors, setColors] = useState<ColorItem[]>(product?._availableColors || []);
   const [colorChanged, setColorChanged] = useState(false);
 
-  // Detecta yards em tempo real (tanto para produto novo quanto em edição)
   const currentYards = useMemo(() => {
     const m = title.match(/(\d+)\s*(j|jds|jardas)\b/i);
     return m ? parseInt(m[1], 10) : null;
   }, [title]);
 
-  // Regra clara: precisa de cor se É uma linha (tem yards) E yards NÃO está no skip list
   const showColorSection = useMemo(() => {
-    if (product) return needsColorFromProduct; // para produto existente, confia no parse
-    // para produto novo: só mostra se tem yards E fora do skip list
+    if (product) return needsColorFromProduct;
     if (currentYards === null) return false;
     return !SKIP_COLOR_YARDS.includes(currentYards);
   }, [product, needsColorFromProduct, currentYards]);
+
+  const tabErrors = useMemo((): Partial<Record<EditorTab, boolean>> => {
+    const out: Partial<Record<EditorTab, boolean>> = {};
+    if (!title.trim()) out.info = true;
+    if (!price || Number(price) <= 0) out.info = true;
+    if (rank.trim() !== '' && (isNaN(Number(rank)) || Number(rank) < 0)) out.rank = true;
+    return out;
+  }, [title, price, rank]);
 
   const handleAutoHandle = (t: string) => {
     if (isNew || !product?.handle) {
@@ -559,9 +607,7 @@ function ProductEditor({
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const removeImage = (idx: number) => {
-    setImages(prev => prev.filter((_, i) => i !== idx));
-  };
+  const removeImage = (idx: number) => setImages(prev => prev.filter((_, i) => i !== idx));
   const moveImage = (from: number, to: number) => {
     if (to < 0 || to >= images.length) return;
     setImages(prev => {
@@ -571,19 +617,24 @@ function ProductEditor({
       return next;
     });
   };
+  const makePrimary = (idx: number) => moveImage(idx, 0);
 
   const handleSubmit = () => {
     const errs: string[] = [];
     if (!title.trim()) errs.push('Titulo obrigatorio');
     if (!price || Number(price) <= 0) errs.push('Preco invalido');
-    // Rank validation (opcional, mas se preenchido deve ser numero >= 0)
     let rankValue: number | null = null;
     if (rank.trim() !== '') {
       const n = Number(rank);
-      if (isNaN(n) || n < 0) errs.push('Rank deve ser um numero >= 0');
+      if (isNaN(n) || n < 0) errs.push('Posicao deve ser um numero >= 0');
       else rankValue = Math.floor(n);
     }
-    if (errs.length > 0) { setErrors(errs); return; }
+    if (errs.length > 0) {
+      setErrors(errs);
+      if (!title.trim() || !price || Number(price) <= 0) setTab('info');
+      else if (rank.trim() !== '') setTab('rank');
+      return;
+    }
 
     const finalGroup = showNewGroup && newGroupName.trim() ? newGroupName.trim() : grupo;
 
@@ -599,7 +650,7 @@ function ProductEditor({
       shipping_weight: Number(shWeight) || null,
       images: images.map(i => i.url),
       grupo: finalGroup,
-      rank: rankValue, // pode ser null (sem ranking) ou numero
+      rank: rankValue,
       colors: colorChanged ? colors : undefined,
       isNew,
     });
@@ -607,258 +658,199 @@ function ProductEditor({
 
   return (
     <div className="fixed inset-0 bg-zinc-50 z-50 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="bg-white border-b border-zinc-200 px-3 sm:px-6 py-3 flex items-center justify-between shrink-0 shadow-sm gap-2">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl transition-colors shrink-0">
-            <ArrowLeft size={20} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm sm:text-base font-bold text-zinc-900 flex items-center gap-2 truncate">
-              {isNew ? <PlusCircle size={18} className="text-emerald-600 shrink-0" /> : <Pencil size={18} className="text-blue-600 shrink-0" />}
-              <span className="truncate">{isNew ? 'Novo Produto' : 'Editar Produto'}</span>
-            </h2>
-            {!isNew && <p className="text-[10px] text-zinc-400 truncate">{product?.title}</p>}
+      <div className="bg-white border-b border-zinc-200 px-3 py-2.5 flex items-center gap-2 shrink-0 shadow-sm">
+        <button onClick={onClose} className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-xl shrink-0" aria-label="Voltar">
+          <ArrowLeft size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-bold text-zinc-900 flex items-center gap-1.5 truncate">
+            {isNew
+              ? <><PlusCircle size={14} className="text-emerald-600 shrink-0" /> Novo produto</>
+              : <><Pencil size={14} className="text-blue-600 shrink-0" /> <span className="truncate">{product?.title || 'Editar'}</span></>
+            }
+          </h2>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            <StatusDot status={status} />
+            <span className="text-[10px] text-zinc-500 font-medium">
+              {status === 'published' ? 'Publicado' : 'Rascunho'}
+            </span>
+            {!isNew && product?._rank !== null && product?._rank !== undefined && (
+              <RankPill rank={product._rank} />
+            )}
           </div>
         </div>
         <button
           onClick={handleSubmit}
           disabled={saving}
-          className="bg-blue-600 text-white px-3 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors shadow-sm shrink-0"
+          className="bg-blue-600 text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 shrink-0"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          <span className="hidden sm:inline">{saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar'}</span>
-          <span className="sm:hidden">{saving ? '...' : 'Salvar'}</span>
+          <span>{saving ? '...' : 'Salvar'}</span>
         </button>
       </div>
 
-      {/* Body — 1 coluna no mobile, max-w-3xl no desktop (sem grid complexo) */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="max-w-3xl mx-auto px-3 sm:px-5 py-4 pb-28 space-y-3">
+      <EditorTabs current={tab} onChange={setTab} errors={tabErrors} />
 
-          {/* BANNER DE RASCUNHO (quando produto é draft e existe) */}
-          {!isNew && status === 'draft' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-800 flex items-start gap-2">
-              <Flag size={14} className="shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <strong className="block text-amber-900">Modo Rascunho</strong>
-                Este produto esta em rascunho. Voce pode editar e testar livremente —
-                ele <strong>nao aparece na loja publica</strong> enquanto estiver assim.
-              </div>
-            </div>
-          )}
+      {!isNew && status === 'draft' && (
+        <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 text-[11px] text-amber-900 flex items-center gap-2 shrink-0">
+          <Flag size={12} className="shrink-0" />
+          <span className="flex-1 min-w-0"><strong>Modo Rascunho</strong> — voce pode editar e testar livremente. Nao aparece na loja.</span>
+        </div>
+      )}
 
-          {/* ERROS */}
-          {errors.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-sm text-red-700 space-y-1">
+      {errors.length > 0 && (
+        <div className="bg-red-50 border-b border-red-200 px-3 py-2 text-[12px] text-red-700 shrink-0">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
               {errors.map((e, i) => <p key={i} className="break-words">- {e}</p>)}
-              <button onClick={() => setErrors([])} className="text-red-500 text-xs underline mt-1">Fechar</button>
             </div>
+            <button onClick={() => setErrors([])} className="text-red-400 p-1 shrink-0"><X size={14} /></button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="max-w-2xl mx-auto px-3 py-4 pb-28 space-y-3">
+
+          {tab === 'info' && (
+            <>
+              <Field label="Titulo" required>
+                <input
+                  value={title}
+                  onChange={e => { setTitle(e.target.value); handleAutoHandle(e.target.value); }}
+                  className={INPUT_CLASS}
+                  placeholder="Ex: SHARK ATTACK 3000j Fio 4.4"
+                />
+              </Field>
+
+              <Field label="URL (handle)">
+                <input
+                  value={handle}
+                  onChange={e => setHandle(e.target.value)}
+                  className={INPUT_CLASS + ' font-mono text-zinc-600'}
+                  placeholder="shark-attack-3000j"
+                />
+              </Field>
+
+              <Field label="Preco" required icon={<DollarSign size={11} />}>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-sm">R$</span>
+                  <input
+                    type="number" inputMode="decimal" step="0.01" min="0"
+                    value={price}
+                    onChange={e => setPrice(e.target.value)}
+                    className={INPUT_CLASS + ' pl-10'}
+                    placeholder="45.90"
+                  />
+                </div>
+              </Field>
+
+              <Field label="Status">
+                <div className="flex gap-2">
+                  <StatusButton active={status === 'published'} onClick={() => setStatus('published')} variant="pub" />
+                  <StatusButton active={status === 'draft'}     onClick={() => setStatus('draft')}     variant="draft" />
+                </div>
+                <p className="text-[10px] text-zinc-400 mt-1.5">
+                  Produtos em rascunho podem ser editados e testados sem aparecer na loja.
+                </p>
+              </Field>
+
+              <Field label="Grupo / Marca" icon={<Folder size={11} />}>
+                {!showNewGroup ? (
+                  <div className="flex gap-2">
+                    <select
+                      value={grupo}
+                      onChange={e => setGrupo(e.target.value)}
+                      className={INPUT_CLASS + ' flex-1 min-w-0 bg-white'}
+                    >
+                      <option value="">Detectar automaticamente</option>
+                      {allGroups.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                    <button
+                      onClick={() => setShowNewGroup(true)}
+                      className="px-3 py-2 rounded-xl border border-dashed border-zinc-300 text-zinc-500 hover:border-blue-400 hover:text-blue-600 text-xs font-medium flex items-center gap-1 shrink-0"
+                    >
+                      <FolderPlus size={14} /> Novo
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      value={newGroupName}
+                      onChange={e => setNewGroupName(e.target.value)}
+                      className={INPUT_CLASS + ' flex-1 min-w-0 border-blue-300 bg-blue-50/30'}
+                      placeholder="Nome do novo grupo..."
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => { setShowNewGroup(false); setNewGroupName(''); }}
+                      className="px-3 py-2 rounded-xl border border-zinc-200 text-zinc-500 text-xs shrink-0"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                )}
+              </Field>
+
+              <Field label="Descricao">
+                <textarea
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  rows={4}
+                  className={INPUT_CLASS + ' resize-y'}
+                  placeholder="Descricao do produto (suporta HTML)..."
+                />
+              </Field>
+            </>
           )}
 
-          {/* 1. INFORMACOES BASICAS */}
-          <Section title="Informacoes Basicas" icon={<Package size={16} />} defaultOpen>
-            {/* Titulo */}
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Titulo *</label>
-              <input
-                value={title}
-                onChange={e => { setTitle(e.target.value); handleAutoHandle(e.target.value); }}
-                className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                placeholder="Ex: SHARK ATTACK 3000j Fio 4.4"
-              />
-            </div>
-            {/* Handle */}
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Handle (URL)</label>
-              <input
-                value={handle}
-                onChange={e => setHandle(e.target.value)}
-                className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm font-mono text-zinc-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                placeholder="shark-attack-3000j"
-              />
-            </div>
-            {/* Preco */}
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <DollarSign size={11} /> Preco (R$) *
-              </label>
-              <input
-                type="number" inputMode="decimal" step="0.01" min="0"
-                value={price}
-                onChange={e => setPrice(e.target.value)}
-                className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                placeholder="45.90"
-              />
-            </div>
-            {/* Status */}
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Status</label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setStatus('published')}
-                  className={`flex-1 py-3 px-2 rounded-xl text-xs font-semibold border transition-all min-w-0 ${
-                    status === 'published' ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-zinc-600 border-zinc-200'
-                  }`}
-                >
-                  <Eye size={14} className="inline mr-1" />
-                  Publicado
-                </button>
-                <button
-                  onClick={() => setStatus('draft')}
-                  className={`flex-1 py-3 px-2 rounded-xl text-xs font-semibold border transition-all min-w-0 ${
-                    status === 'draft' ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-white text-zinc-600 border-zinc-200'
-                  }`}
-                >
-                  <EyeOff size={14} className="inline mr-1" />
-                  Rascunho
-                </button>
-              </div>
-              <p className="text-[10px] text-zinc-400 mt-1.5">
-                Produtos em rascunho podem ser editados e testados livremente sem aparecer na loja publica.
-              </p>
-            </div>
-            {/* Grupo */}
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Folder size={11} /> Grupo
-              </label>
-              {!showNewGroup ? (
-                <div className="flex gap-2">
-                  <select
-                    value={grupo}
-                    onChange={e => setGrupo(e.target.value)}
-                    className="flex-1 min-w-0 px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-white"
-                  >
-                    <option value="">Detectar automaticamente</option>
-                    {allGroups.map(g => (<option key={g} value={g}>{g}</option>))}
-                  </select>
-                  <button
-                    onClick={() => setShowNewGroup(true)}
-                    className="px-3 py-2 rounded-xl border border-dashed border-zinc-300 text-zinc-500 hover:border-blue-400 hover:text-blue-600 transition-all text-xs font-medium flex items-center gap-1 shrink-0"
-                  >
-                    <FolderPlus size={14} /> Novo
-                  </button>
+          {tab === 'images' && (
+            <>
+              {images.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {images.map((img, idx) => (
+                    <div key={idx} className="relative aspect-square rounded-xl overflow-hidden bg-zinc-100 border border-zinc-200">
+                      <img src={img.url} alt={`Img ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      {idx === 0 && (
+                        <span className="absolute top-0 left-0 right-0 bg-blue-600/85 text-white text-[9px] text-center py-0.5 font-bold uppercase tracking-wider">
+                          Principal
+                        </span>
+                      )}
+                      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-1.5 bg-gradient-to-t from-black/60 to-transparent">
+                        <div className="flex gap-1">
+                          {idx > 0 && (
+                            <button onClick={() => moveImage(idx, idx - 1)} className="w-6 h-6 bg-white/95 rounded-md flex items-center justify-center text-zinc-700 shadow" aria-label="Esquerda">
+                              <ChevronLeft size={12} />
+                            </button>
+                          )}
+                          {idx < images.length - 1 && (
+                            <button onClick={() => moveImage(idx, idx + 1)} className="w-6 h-6 bg-white/95 rounded-md flex items-center justify-center text-zinc-700 shadow" aria-label="Direita">
+                              <ChevronRight size={12} />
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          {idx !== 0 && (
+                            <button onClick={() => makePrimary(idx)} className="w-6 h-6 bg-blue-500/95 rounded-md flex items-center justify-center text-white shadow" aria-label="Principal" title="Tornar principal">
+                              <ArrowUp size={12} />
+                            </button>
+                          )}
+                          <button onClick={() => removeImage(idx)} className="w-6 h-6 bg-red-500/95 rounded-md flex items-center justify-center text-white shadow" aria-label="Remover">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div className="flex gap-2">
-                  <input
-                    value={newGroupName}
-                    onChange={e => setNewGroupName(e.target.value)}
-                    className="flex-1 min-w-0 px-3 py-3 rounded-xl border border-blue-300 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all bg-blue-50/30"
-                    placeholder="Nome do novo grupo..."
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => { setShowNewGroup(false); setNewGroupName(''); }}
-                    className="px-3 py-2 rounded-xl border border-zinc-200 text-zinc-500 hover:text-zinc-700 transition-all text-xs shrink-0"
-                  >
-                    Cancelar
-                  </button>
+                <div className="bg-zinc-50 border border-zinc-200 rounded-2xl px-4 py-6 text-center text-[12px] text-zinc-500">
+                  <Camera size={24} className="mx-auto mb-2 text-zinc-300" />
+                  Nenhuma imagem ainda. Adicione abaixo.
                 </div>
               )}
-              <p className="text-[10px] text-zinc-400 mt-1">Se vazio, sera detectado pelo titulo.</p>
-            </div>
-            {/* Descricao */}
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Descricao (HTML)</label>
-              <textarea
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                rows={4}
-                className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y transition-all"
-                placeholder="Descricao do produto..."
-              />
-            </div>
-          </Section>
 
-          {/* 2. POSICAO NA LOJA (RANKING) */}
-          <Section
-            title="Posicao na Loja (Ranking)"
-            icon={<TrendingUp size={16} />}
-            defaultOpen={false}
-            badge={
-              rank.trim() !== '' && !isNaN(Number(rank))
-                ? <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold ml-auto">#{rank}</span>
-                : null
-            }
-          >
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                <Hash size={11} /> Posicao manual
-              </label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="number" inputMode="numeric" min="0" step="1"
-                  value={rank}
-                  onChange={e => setRank(e.target.value)}
-                  className="flex-1 min-w-0 px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  placeholder="Ex: 1 (topo), 5, 10..."
-                />
-                {rank.trim() !== '' && (
-                  <button
-                    onClick={() => setRank('')}
-                    className="px-3 py-2 rounded-xl border border-zinc-200 text-zinc-500 hover:text-red-600 text-xs shrink-0"
-                    title="Remover ranking"
-                  >
-                    Limpar
-                  </button>
-                )}
-              </div>
-              <div className="mt-2 text-[11px] text-zinc-500 space-y-1">
-                <p>- <strong>Menor = mais no topo</strong>. Ex.: <code className="bg-zinc-100 px-1 rounded">1</code> aparece antes de <code className="bg-zinc-100 px-1 rounded">5</code>.</p>
-                <p>- <strong>Deixe vazio</strong> para nao priorizar (ordem normal).</p>
-                <p>- Funciona junto com o filtro de categoria/jarda: o rank so afeta a ordem dentro da mesma lista.</p>
-              </div>
-              {rank.trim() !== '' && !isNaN(Number(rank)) && (
-                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[11px] text-amber-800 flex items-start gap-2">
-                  <TrendingUp size={12} className="shrink-0 mt-0.5" />
-                  <span>Este produto ira aparecer na posicao <strong>#{rank}</strong> nas listagens.</span>
-                </div>
-              )}
-            </div>
-          </Section>
-
-          {/* 3. IMAGENS */}
-          <Section
-            title="Imagens"
-            icon={<Camera size={16} />}
-            badge={images.length > 0 ? <span className="text-[10px] text-zinc-400 font-normal ml-auto">({images.length})</span> : null}
-            defaultOpen
-          >
-            {images.length > 0 && (
-              <div className="grid grid-cols-3 gap-2">
-                {images.map((img, idx) => (
-                  <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden bg-zinc-100 border border-zinc-200">
-                    <img src={img.url} alt={`Img ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    {/* Controles sempre visiveis no mobile (touch) */}
-                    <div className="absolute inset-0 flex items-end justify-between p-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                      <div className="flex gap-1">
-                        {idx > 0 && (
-                          <button onClick={() => moveImage(idx, idx - 1)} className="w-6 h-6 bg-white/90 rounded-md flex items-center justify-center text-zinc-700 shadow">
-                            <ChevronLeft size={12} />
-                          </button>
-                        )}
-                        {idx < images.length - 1 && (
-                          <button onClick={() => moveImage(idx, idx + 1)} className="w-6 h-6 bg-white/90 rounded-md flex items-center justify-center text-zinc-700 shadow">
-                            <ChevronRight size={12} />
-                          </button>
-                        )}
-                      </div>
-                      <button onClick={() => removeImage(idx)} className="w-6 h-6 bg-red-500/90 rounded-md flex items-center justify-center text-white shadow">
-                        <X size={12} />
-                      </button>
-                    </div>
-                    {idx === 0 && (
-                      <span className="absolute top-0 left-0 right-0 bg-blue-600/80 text-white text-[9px] text-center py-0.5 font-semibold">
-                        Principal
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -870,174 +862,275 @@ function ProductEditor({
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingImage}
-                className="w-full border-2 border-dashed border-zinc-300 hover:border-blue-400 rounded-xl py-6 flex flex-col items-center justify-center gap-2 text-zinc-500 hover:text-blue-600 hover:bg-blue-50/30 transition-all disabled:opacity-50 cursor-pointer"
+                className="w-full border-2 border-dashed border-zinc-300 hover:border-blue-400 rounded-xl py-5 flex flex-col items-center justify-center gap-1.5 text-zinc-500 hover:text-blue-600 hover:bg-blue-50/30 disabled:opacity-50"
               >
                 {uploadingImage ? (
                   <>
-                    <Loader2 size={24} className="animate-spin text-blue-500" />
+                    <Loader2 size={22} className="animate-spin text-blue-500" />
                     <span className="text-xs font-medium text-blue-600">Fazendo upload...</span>
                   </>
                 ) : (
                   <>
-                    <Upload size={22} />
-                    <span className="text-xs font-medium">Clique para selecionar imagens</span>
-                    <span className="text-[10px] text-zinc-400 text-center px-2">JPG, PNG, WebP - Max 10MB cada</span>
+                    <Upload size={20} />
+                    <span className="text-xs font-semibold">Adicionar imagens</span>
+                    <span className="text-[10px] text-zinc-400">JPG, PNG, WebP (max 10MB)</span>
                   </>
                 )}
               </button>
-            </div>
-          </Section>
+              <p className="text-[10px] text-zinc-400 flex items-start gap-1">
+                <Info size={10} className="shrink-0 mt-0.5" />
+                A primeira imagem e a principal (aparece no catalogo).
+              </p>
+            </>
+          )}
 
-          {/* 4. CORES — SO APARECE SE PRODUTO ACEITA COR */}
-          {showColorSection && (
-            <Section
-              title="Cores Disponiveis na Loja"
-              icon={<Palette size={16} className="text-purple-600" />}
-              badge={product ? <ColorSourceBadge source={product._colorSource} /> : null}
-              defaultOpen
-            >
-              {product?._colorSource === 'derived' && !colorChanged && (
-                <p className="text-[11px] text-blue-700 bg-blue-50 rounded-lg px-3 py-2 border border-blue-100">
-                  Cores pre-preenchidas automaticamente. Edite e salve para que as mudancas aparecam na loja publica.
-                </p>
-              )}
-
-              <div>
-                <p className="text-[10px] font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">Cores Atuais</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {colors.length === 0 ? (
-                    <span className="text-[11px] text-zinc-400 italic py-2">Sem cores definidas. Adicione abaixo.</span>
-                  ) : colors.map(c => (
-                    <div
-                      key={c.name}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
-                        c.in_stock ? 'bg-white border-zinc-200 text-zinc-700' : 'bg-red-50 border-red-200 text-red-400'
-                      }`}
-                    >
-                      <ColorDot name={c.name} hex={c.hex} size="md" />
-                      <span className={!c.in_stock ? 'line-through' : ''}>{c.name}</span>
-                      <button
-                        onClick={() => {
-                          setColors(prev => prev.map(cc => cc.name === c.name ? { ...cc, in_stock: !cc.in_stock } : cc));
-                          setColorChanged(true);
-                        }}
-                        className="p-0.5 rounded transition-colors"
-                        title={c.in_stock ? 'Marcar sem estoque' : 'Marcar em estoque'}
-                      >
-                        {c.in_stock ? <EyeOff size={12} className="text-zinc-400" /> : <Eye size={12} className="text-emerald-500" />}
-                      </button>
-                      <button
-                        onClick={() => { setColors(prev => prev.filter(cc => cc.name !== c.name)); setColorChanged(true); }}
-                        className="p-0.5 text-zinc-300 hover:text-red-500 transition-colors"
-                        title="Remover"
-                      >
-                        <X size={12} />
-                      </button>
+          {tab === 'colors' && (
+            <>
+              {!showColorSection ? (
+                <div className="bg-zinc-50 border border-zinc-200 rounded-2xl p-5 text-center">
+                  <div className="w-12 h-12 rounded-full bg-zinc-200 mx-auto mb-3 flex items-center justify-center">
+                    <Palette size={20} className="text-zinc-400" />
+                  </div>
+                  <p className="text-sm font-bold text-zinc-700 mb-1">
+                    Este produto nao usa variacao de cor
+                  </p>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    {currentYards !== null && SKIP_COLOR_YARDS.includes(currentYards)
+                      ? `Linhas de ${currentYards} jardas sao vendidas como "sortida" — o cliente nao escolhe cor.`
+                      : 'Produtos sem jardas detectadas (carretilhas, camisas, bones) nao mostram cores para o cliente.'}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {product?._colorSource === 'derived' && !colorChanged && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 text-[11px] text-blue-700 flex items-start gap-2">
+                      <Info size={12} className="shrink-0 mt-0.5" />
+                      <span>
+                        Cores pre-preenchidas automaticamente (linha <strong>{product._colorGroup || 'padrao'}</strong>).
+                        Edite e salve para personalizar.
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  )}
 
-              <div>
-                <p className="text-[10px] font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">Adicionar Cores</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {ALL_COLORS.filter(ac => !colors.find(c => c.name === ac.name)).map(ac => (
-                    <button
-                      key={ac.name}
-                      onClick={() => { setColors(prev => [...prev, { name: ac.name, hex: ac.hex, in_stock: true }]); setColorChanged(true); }}
-                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-dashed border-zinc-300 text-[10px] text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50/50 transition-all"
-                    >
-                      <Plus size={10} />
-                      <ColorDot name={ac.name} hex={ac.hex} />
-                      <span>{ac.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {colorChanged && (
-                <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 text-[11px] text-purple-700 flex items-center gap-2">
-                  <Info size={12} className="shrink-0" />
-                  As cores serao salvas quando voce clicar em Salvar.
-                </div>
-              )}
-            </Section>
-          )}
-
-          {/* Se produto NAO aceita cor, explicar por que */}
-          {!showColorSection && (currentYards !== null || product) && (
-            <div className="bg-zinc-50 border border-zinc-200 rounded-2xl px-4 py-3 text-[11px] text-zinc-500 flex items-start gap-2">
-              <Info size={13} className="shrink-0 mt-0.5 text-zinc-400" />
-              <div className="min-w-0">
-                <strong className="block text-zinc-700">Este produto nao usa variacao de cor</strong>
-                {currentYards !== null && SKIP_COLOR_YARDS.includes(currentYards)
-                  ? `Linhas de ${currentYards} jardas sao vendidas como "sortida" (sem escolha de cor).`
-                  : 'Produto sem jardas detectadas — nao mostra cores para o cliente escolher.'}
-              </div>
-            </div>
-          )}
-
-          {/* 5. DIMENSOES E PESO */}
-          <Section title="Dimensoes e Peso (SuperFrete)" icon={<Ruler size={16} />} defaultOpen={false}>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] font-medium text-zinc-400 mb-1">Altura (cm)</label>
-                <input type="number" inputMode="decimal" step="0.1" min="0" value={shHeight} onChange={e => setShHeight(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="12" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-medium text-zinc-400 mb-1">Largura (cm)</label>
-                <input type="number" inputMode="decimal" step="0.1" min="0" value={shWidth} onChange={e => setShWidth(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="12" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-medium text-zinc-400 mb-1">Comprimento (cm)</label>
-                <input type="number" inputMode="decimal" step="0.1" min="0" value={shLength} onChange={e => setShLength(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="19" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-medium text-zinc-400 mb-1">Peso (kg)</label>
-                <input type="number" inputMode="decimal" step="0.01" min="0" value={shWeight} onChange={e => setShWeight(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="0.5" />
-              </div>
-            </div>
-            {(() => {
-              const m = title?.match(/([0-9]+)\s*UNIDADES?/i);
-              const unidades = m ? parseInt(m[1], 10) : 1;
-              const peso = Number(shWeight) || 0;
-              if (unidades < 2 || peso <= 0) return null;
-              const pesoPorUnidade = peso / unidades;
-              if (pesoPorUnidade < 0.04) {
-                return (
-                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
-                    <Info size={14} className="shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <strong>Peso suspeito:</strong> {unidades} unidades com apenas {peso} kg
-                      ({(pesoPorUnidade * 1000).toFixed(1)} g por unidade). Verifique se esta correto.
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-2xl p-3">
+                    <p className="text-[10px] font-bold text-purple-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                      <Eye size={10} /> Preview na loja
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {colors.filter(c => c.in_stock).length === 0 ? (
+                        <span className="text-[11px] text-purple-400 italic">O cliente nao vera cores disponiveis</span>
+                      ) : colors.filter(c => c.in_stock).map(c => (
+                        <span key={c.name} className="flex items-center gap-1 bg-white px-2 py-1 rounded-full border border-purple-200 text-[11px] font-medium text-zinc-700">
+                          <ColorDot name={c.name} hex={c.hex} size="md" />
+                          {c.name}
+                        </span>
+                      ))}
                     </div>
                   </div>
-                );
-              }
-              return null;
-            })()}
-            <p className="text-[10px] text-zinc-400 flex items-start gap-1">
-              <Info size={10} className="shrink-0 mt-0.5" />
-              <span>Estas dimensoes sao usadas pelo SuperFrete. Para packs, pese o pacote completo.</span>
-            </p>
-          </Section>
+
+                  <div>
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                      Cores configuradas ({colors.length})
+                    </p>
+                    {colors.length === 0 ? (
+                      <p className="text-[11px] text-zinc-400 italic py-2">Sem cores. Adicione abaixo.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {colors.map(c => (
+                          <div
+                            key={c.name}
+                            className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border ${c.in_stock ? 'bg-white border-zinc-200' : 'bg-red-50 border-red-200'}`}
+                          >
+                            <ColorDot name={c.name} hex={c.hex} size="lg" />
+                            <span className={`flex-1 min-w-0 text-sm font-medium truncate ${c.in_stock ? 'text-zinc-800' : 'text-red-400 line-through'}`}>
+                              {c.name}
+                            </span>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${c.in_stock ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                              {c.in_stock ? 'Em estoque' : 'Sem estoque'}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setColors(prev => prev.map(cc => cc.name === c.name ? { ...cc, in_stock: !cc.in_stock } : cc));
+                                setColorChanged(true);
+                              }}
+                              className="p-1.5 text-zinc-400 hover:text-blue-600 shrink-0"
+                              aria-label="Alternar estoque"
+                              title="Alternar estoque"
+                            >
+                              {c.in_stock ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                            <button
+                              onClick={() => { setColors(prev => prev.filter(cc => cc.name !== c.name)); setColorChanged(true); }}
+                              className="p-1.5 text-zinc-400 hover:text-red-500 shrink-0"
+                              aria-label="Remover"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {ALL_COLORS.some(ac => !colors.find(c => c.name === ac.name)) && (
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                        Adicionar cor
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ALL_COLORS.filter(ac => !colors.find(c => c.name === ac.name)).map(ac => (
+                          <button
+                            key={ac.name}
+                            onClick={() => {
+                              setColors(prev => [...prev, { name: ac.name, hex: ac.hex, in_stock: true }]);
+                              setColorChanged(true);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-zinc-300 text-xs text-zinc-600 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50/50"
+                          >
+                            <Plus size={11} />
+                            <ColorDot name={ac.name} hex={ac.hex} size="md" />
+                            <span>{ac.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {colorChanged && (
+                    <div className="bg-purple-50 border border-purple-200 rounded-xl px-3 py-2 text-[11px] text-purple-700 flex items-center gap-2">
+                      <Info size={12} className="shrink-0" />
+                      Cores sao salvas quando voce clicar em <strong>Salvar</strong> no topo.
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {tab === 'rank' && (
+            <>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <p className="text-sm font-bold text-amber-900 flex items-center gap-2 mb-1">
+                  <TrendingUp size={16} /> Como funciona a posicao manual
+                </p>
+                <ul className="text-[11px] text-amber-800 leading-relaxed space-y-1 pl-4 list-disc">
+                  <li><strong>Menor numero = mais no topo</strong> (1 aparece antes de 5).</li>
+                  <li>Vazio = <strong>sem prioridade</strong> (ordem normal da loja).</li>
+                  <li>So afeta ordem <strong>dentro da mesma lista</strong> (mesma jarda/categoria).</li>
+                  <li>Use o <strong>modo Ordenar</strong> na lista para reorganizar visualmente.</li>
+                </ul>
+              </div>
+
+              <Field label="Posicao" icon={<Hash size={11} />}>
+                <div className="flex gap-2 items-stretch">
+                  <input
+                    type="number" inputMode="numeric" min="0" step="1"
+                    value={rank}
+                    onChange={e => setRank(e.target.value)}
+                    className={INPUT_CLASS + ' flex-1 min-w-0'}
+                    placeholder="Ex: 1 (topo), 2, 3..."
+                  />
+                  {rank.trim() !== '' && (
+                    <button onClick={() => setRank('')} className="px-3 py-2 rounded-xl border border-zinc-200 text-zinc-500 hover:text-red-600 text-xs font-medium shrink-0">
+                      Limpar
+                    </button>
+                  )}
+                </div>
+                {rank.trim() !== '' && !isNaN(Number(rank)) && (
+                  <div className="mt-3 bg-white border border-amber-200 rounded-xl px-3 py-2.5 text-[11px] text-amber-900 flex items-center gap-2">
+                    <TrendingUp size={12} className="shrink-0" />
+                    <span>Este produto aparecera na <strong>posicao #{rank}</strong> nas listagens.</span>
+                  </div>
+                )}
+              </Field>
+
+              <div>
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Atalhos</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {['1', '2', '3', '5', '10', '20'].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setRank(n)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                        rank === n
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-zinc-100 text-zinc-600 hover:bg-amber-50 hover:text-amber-700 border border-zinc-200'
+                      }`}
+                    >
+                      #{n}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setRank('')}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                      rank === ''
+                        ? 'bg-zinc-900 text-white'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 border border-zinc-200'
+                    }`}
+                  >
+                    Sem rank
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'shipping' && (
+            <>
+              <div className="grid grid-cols-2 gap-2.5">
+                <Field label="Altura (cm)">
+                  <input type="number" inputMode="decimal" step="0.1" min="0" value={shHeight} onChange={e => setShHeight(e.target.value)} className={INPUT_CLASS} placeholder="12" />
+                </Field>
+                <Field label="Largura (cm)">
+                  <input type="number" inputMode="decimal" step="0.1" min="0" value={shWidth} onChange={e => setShWidth(e.target.value)} className={INPUT_CLASS} placeholder="12" />
+                </Field>
+                <Field label="Comprimento (cm)">
+                  <input type="number" inputMode="decimal" step="0.1" min="0" value={shLength} onChange={e => setShLength(e.target.value)} className={INPUT_CLASS} placeholder="19" />
+                </Field>
+                <Field label="Peso (kg)">
+                  <input type="number" inputMode="decimal" step="0.01" min="0" value={shWeight} onChange={e => setShWeight(e.target.value)} className={INPUT_CLASS} placeholder="0.5" />
+                </Field>
+              </div>
+              {(() => {
+                const m = title?.match(/([0-9]+)\s*UNIDADES?/i);
+                const unidades = m ? parseInt(m[1], 10) : 1;
+                const peso = Number(shWeight) || 0;
+                if (unidades < 2 || peso <= 0) return null;
+                const pesoPorUnidade = peso / unidades;
+                if (pesoPorUnidade < 0.04) {
+                  return (
+                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Peso suspeito:</strong> {unidades} unidades com {peso} kg
+                        ({(pesoPorUnidade * 1000).toFixed(1)} g/unidade).
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              <p className="text-[10px] text-zinc-400 flex items-start gap-1">
+                <Info size={10} className="shrink-0 mt-0.5" />
+                Dimensoes usadas pelo SuperFrete. Para packs, pese o pacote completo.
+              </p>
+            </>
+          )}
 
         </div>
       </div>
 
-      {/* Bottom save bar (mobile) */}
-      <div className="sm:hidden bg-white border-t border-zinc-200 px-3 py-2.5 shrink-0 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]" style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}>
+      <div
+        className="sm:hidden bg-white border-t border-zinc-200 px-3 py-2 shrink-0 shadow-[0_-2px_10px_rgba(0,0,0,0.06)]"
+        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      >
         <button
           onClick={handleSubmit}
           disabled={saving}
-          className="w-full bg-blue-600 text-white px-4 py-3.5 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+          className="w-full bg-blue-600 text-white px-4 py-3.5 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-          {saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar Alteracoes'}
+          {saving ? 'Salvando...' : isNew ? 'Criar Produto' : 'Salvar alteracoes'}
         </button>
       </div>
     </div>
@@ -1045,7 +1138,400 @@ function ProductEditor({
 }
 
 // ============================================================================
-// BULK COLOR EDITOR (mantido do original, compacto)
+// PRODUCT CARD — compacto
+// ============================================================================
+
+function ProductCard({
+  product, isSelected, onToggleSelect, onOpenActions, onEdit, selectionMode,
+}: {
+  product: ParsedProduct;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  onOpenActions: (p: ParsedProduct) => void;
+  onEdit: (p: ParsedProduct) => void;
+  selectionMode: boolean;
+}) {
+  const image = product.images?.[0]?.url || product.thumbnail || '';
+  const isMulticolor = product._isLine && !product._needsColorSelection;
+  const inStockColors = product._availableColors.filter(c => c.in_stock);
+
+  return (
+    <div
+      className={`flex items-stretch gap-2 px-2.5 py-2.5 border-b border-zinc-100 last:border-b-0 transition-colors ${
+        isSelected ? 'bg-blue-50/60' : 'hover:bg-zinc-50/50'
+      }`}
+    >
+      {selectionMode && (
+        <button onClick={onToggleSelect} className="shrink-0 flex items-center touch-manipulation px-1" aria-label="Selecionar">
+          {isSelected ? <CheckSquare size={20} className="text-blue-600" /> : <Square size={20} className="text-zinc-300" />}
+        </button>
+      )}
+
+      <button
+        onClick={() => onEdit(product)}
+        className="w-14 h-14 rounded-xl overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200 relative touch-manipulation"
+        aria-label="Editar produto"
+      >
+        {image ? (
+          <img src={image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-zinc-300">
+            <Package size={18} />
+          </div>
+        )}
+        {product._rank !== null && (
+          <span className="absolute top-0 left-0 bg-amber-500 text-white text-[10px] font-bold px-1.5 rounded-br-lg leading-4">
+            #{product._rank}
+          </span>
+        )}
+      </button>
+
+      <button onClick={() => onEdit(product)} className="flex-1 min-w-0 text-left touch-manipulation">
+        <p className="text-[13px] font-semibold text-zinc-900 leading-tight line-clamp-2 break-words">
+          {product.title}
+        </p>
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+          <StatusDot status={product.status} />
+          <span className="text-[11px] font-bold text-zinc-700">R$ {product._priceDisplay}</span>
+          {product._yards && (
+            <span className="text-[10px] text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded">{product._yards}j</span>
+          )}
+          {product._stock !== null && product._stock <= 0 && (
+            <span className="text-[10px] text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-semibold">Sem estoque</span>
+          )}
+          {isMulticolor && (
+            <span className="text-[9px] bg-gradient-to-r from-red-100 via-yellow-100 to-blue-100 text-zinc-700 px-1.5 py-0.5 rounded font-medium border border-zinc-200/50">
+              Multicor
+            </span>
+          )}
+        </div>
+        {product._isLine && product._needsColorSelection && (
+          <div className="flex items-center gap-1 mt-1.5 flex-wrap min-w-0">
+            <Palette size={10} className="text-purple-500 shrink-0" />
+            <div className="flex -space-x-1 shrink-0">
+              {inStockColors.slice(0, 6).map(c => (
+                <span
+                  key={c.name}
+                  className="w-3.5 h-3.5 rounded-full border-2 border-white"
+                  style={c.hex.startsWith('linear') ? { background: c.hex } : { backgroundColor: c.hex }}
+                  title={c.name}
+                />
+              ))}
+            </div>
+            <span className="text-[10px] text-zinc-500 shrink-0">
+              {inStockColors.length}/{product._availableColors.length}
+            </span>
+            {product._colorSource === 'derived' && (
+              <span className="text-[9px] bg-blue-50 text-blue-600 px-1 py-0.5 rounded border border-blue-200/60 font-medium shrink-0">
+                Auto
+              </span>
+            )}
+          </div>
+        )}
+      </button>
+
+      <button
+        onClick={() => onOpenActions(product)}
+        className="shrink-0 p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl self-start touch-manipulation"
+        aria-label="Acoes"
+      >
+        <MoreHorizontal size={18} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
+// PRODUCT ACTION SHEET
+// ============================================================================
+
+function ProductActionSheet({
+  product, onClose, onEdit, onStatusChange, onQuickRank, saving,
+}: {
+  product: ParsedProduct;
+  onClose: () => void;
+  onEdit: (p: ParsedProduct) => void;
+  onStatusChange: (id: string, s: string) => void;
+  onQuickRank: (id: string) => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[90] flex items-end justify-center" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-md overflow-hidden animate-slide-up-bar"
+        onClick={e => e.stopPropagation()}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="flex justify-center pt-2 pb-1">
+          <span className="block w-10 h-1 bg-zinc-300 rounded-full" />
+        </div>
+
+        <div className="px-4 pb-3 border-b border-zinc-100 flex items-center gap-2">
+          <div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+            {product.images?.[0]?.url
+              ? <img src={product.images[0].url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              : <div className="w-full h-full flex items-center justify-center text-zinc-300"><Package size={14} /></div>}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-zinc-900 truncate">{product.title}</p>
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+              <StatusDot status={product.status} />
+              <span className="text-[10px] text-zinc-500">R$ {product._priceDisplay}</span>
+              {product._rank !== null && <RankPill rank={product._rank} />}
+            </div>
+          </div>
+        </div>
+
+        <div className="py-1">
+          <ActionRow icon={<Pencil size={16} className="text-blue-600" />} label="Editar produto" onClick={() => { onClose(); onEdit(product); }} />
+          <ActionRow icon={<TrendingUp size={16} className="text-amber-600" />} label={product._rank !== null ? `Posicao: #${product._rank}` : 'Definir posicao'} onClick={() => { onClose(); onQuickRank(product.id); }} />
+          {product.status === 'published' ? (
+            <ActionRow icon={<GlobeLock size={16} className="text-amber-600" />} label="Despublicar (virar rascunho)" onClick={() => { onStatusChange(product.id, 'draft'); onClose(); }} disabled={saving} />
+          ) : (
+            <ActionRow icon={<Globe size={16} className="text-emerald-600" />} label="Publicar na loja" onClick={() => { onStatusChange(product.id, 'published'); onClose(); }} disabled={saving} />
+          )}
+        </div>
+
+        <div className="px-4 pt-2 pb-3 border-t border-zinc-100">
+          <button onClick={onClose} className="w-full py-3 rounded-xl text-sm font-bold border border-zinc-200 text-zinc-600 hover:bg-zinc-50">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActionRow({
+  icon, label, onClick, disabled = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-zinc-50 disabled:opacity-50 transition-colors"
+    >
+      <span className="w-8 h-8 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">{icon}</span>
+      <span className="text-sm font-medium text-zinc-800 flex-1 min-w-0 truncate">{label}</span>
+      <ChevronRight size={14} className="text-zinc-300 shrink-0" />
+    </button>
+  );
+}
+
+// ============================================================================
+// QUICK RANK POPUP
+// ============================================================================
+
+function QuickRankPopup({
+  product, onApply, onClose, saving,
+}: {
+  product: ParsedProduct;
+  onApply: (id: string, rank: number | null) => void;
+  onClose: () => void;
+  saving: boolean;
+}) {
+  const [rank, setRank] = useState(product._rank !== null ? String(product._rank) : '');
+
+  const apply = () => {
+    if (rank.trim() === '') { onApply(product.id, null); return; }
+    const n = Number(rank);
+    if (!isNaN(n) && n >= 0) onApply(product.id, Math.floor(n));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[100] flex items-end sm:items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full sm:max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-zinc-100">
+          <h3 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
+            <TrendingUp size={16} className="text-amber-600 shrink-0" />
+            <span className="truncate">Definir posicao</span>
+          </h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{product.title}</p>
+        </div>
+        <div className="px-4 py-3 space-y-2.5">
+          <div className="flex gap-2 items-stretch">
+            <input
+              type="number" inputMode="numeric" min="0" step="1"
+              value={rank}
+              onChange={e => setRank(e.target.value)}
+              className={INPUT_CLASS + ' flex-1 min-w-0'}
+              placeholder="Ex: 1, 2, 3..."
+              autoFocus
+            />
+            {rank.trim() !== '' && (
+              <button onClick={() => setRank('')} className="px-3 rounded-xl border border-zinc-200 text-zinc-500 text-xs font-medium shrink-0">
+                Limpar
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {['1', '2', '3', '5', '10'].map(n => (
+              <button
+                key={n}
+                onClick={() => setRank(n)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                  rank === n ? 'bg-amber-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-amber-50 hover:text-amber-700'
+                }`}
+              >
+                #{n}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-zinc-500">
+            Menor = mais no topo. Deixe vazio para remover.
+          </p>
+        </div>
+        <div className="px-4 py-3 border-t border-zinc-100 flex gap-2">
+          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl text-sm border border-zinc-200 text-zinc-600">
+            Cancelar
+          </button>
+          <button
+            onClick={apply}
+            disabled={saving}
+            className="flex-1 bg-amber-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// BULK ACTION SHEET
+// ============================================================================
+
+function BulkActionSheet({
+  count, onClose, onOpenStatus, onOpenColors, onOpenAddColor, onOpenRemoveColor, onOpenRank,
+}: {
+  count: number;
+  onClose: () => void;
+  onOpenStatus: () => void;
+  onOpenColors: () => void;
+  onOpenAddColor: () => void;
+  onOpenRemoveColor: () => void;
+  onOpenRank: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[90] flex items-end justify-center" onClick={onClose}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-md overflow-hidden animate-slide-up-bar"
+        onClick={e => e.stopPropagation()}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="flex justify-center pt-2 pb-1">
+          <span className="block w-10 h-1 bg-zinc-300 rounded-full" />
+        </div>
+        <div className="px-4 pb-3 border-b border-zinc-100">
+          <h3 className="text-sm font-bold text-zinc-900">Acoes em massa</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">{count} produto{count > 1 ? 's' : ''} selecionado{count > 1 ? 's' : ''}</p>
+        </div>
+        <div className="py-1">
+          <ActionRow icon={<Globe size={16} className="text-blue-600" />} label="Publicar / Despublicar" onClick={() => { onClose(); onOpenStatus(); }} />
+          <ActionRow icon={<TrendingUp size={16} className="text-amber-600" />} label="Definir posicao (ranking)" onClick={() => { onClose(); onOpenRank(); }} />
+          <ActionRow icon={<Palette size={16} className="text-purple-600" />} label="Editar cores (avancado)" onClick={() => { onClose(); onOpenColors(); }} />
+          <ActionRow icon={<Plus size={16} className="text-emerald-600" />} label="Adicionar cor rapidamente" onClick={() => { onClose(); onOpenAddColor(); }} />
+          <ActionRow icon={<Minus size={16} className="text-red-600" />} label="Remover cor rapidamente" onClick={() => { onClose(); onOpenRemoveColor(); }} />
+        </div>
+        <div className="px-4 pt-2 pb-3 border-t border-zinc-100">
+          <button onClick={onClose} className="w-full py-3 rounded-xl text-sm font-bold border border-zinc-200 text-zinc-600 hover:bg-zinc-50">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// BULK STATUS MODAL
+// ============================================================================
+
+function BulkStatusModal({ products, onApply, onClose, saving }: {
+  products: ParsedProduct[];
+  onApply: (productIds: string[], newStatus: string) => void;
+  onClose: () => void;
+  saving: boolean;
+}) {
+  const publishedCount = products.filter(p => p.status === 'published').length;
+  const draftCount = products.filter(p => p.status === 'draft').length;
+  const [confirmUnpub, setConfirmUnpub] = useState(false);
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/50 z-[95] flex items-end sm:items-center justify-center" onClick={onClose}>
+        <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="px-4 py-3 border-b border-zinc-100">
+            <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
+              <Globe size={18} className="text-blue-600 shrink-0" />
+              <span className="truncate">Publicar / Despublicar</span>
+            </h3>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              {products.length} produto(s): {publishedCount} pub, {draftCount} rascunho
+            </p>
+          </div>
+          <div className="px-4 py-4 space-y-2">
+            <button
+              onClick={() => onApply(products.map(p => p.id), 'published')}
+              disabled={saving}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-zinc-200 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all text-left disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                <Globe size={18} className="text-emerald-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-zinc-900">Publicar todos</p>
+                <p className="text-[11px] text-zinc-500 truncate">{products.length} produto(s) visiveis na loja</p>
+              </div>
+              {saving ? <Loader2 size={16} className="animate-spin text-zinc-400 shrink-0" /> : <ChevronRight size={16} className="text-zinc-300 shrink-0" />}
+            </button>
+            <button
+              onClick={() => setConfirmUnpub(true)}
+              disabled={saving}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-zinc-200 hover:border-amber-400 hover:bg-amber-50/50 transition-all text-left disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <GlobeLock size={18} className="text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-zinc-900">Despublicar todos</p>
+                <p className="text-[11px] text-zinc-500 truncate">Ocultar da loja (rascunho)</p>
+              </div>
+              <ChevronRight size={16} className="text-zinc-300 shrink-0" />
+            </button>
+          </div>
+          <div className="px-4 py-3 border-t border-zinc-100">
+            <button onClick={onClose} className="w-full px-4 py-2.5 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {confirmUnpub && (
+        <ConfirmModal
+          title="Despublicar produtos?"
+          message={<>Voce esta prestes a <strong>despublicar {products.length} produto(s)</strong>. Eles ficarao ocultos da loja publica ate serem publicados novamente.</>}
+          confirmLabel="Sim, despublicar"
+          danger
+          loading={saving}
+          onConfirm={() => { setConfirmUnpub(false); onApply(products.map(p => p.id), 'draft'); }}
+          onClose={() => setConfirmUnpub(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ============================================================================
+// BULK COLOR EDITOR
 // ============================================================================
 
 function BulkColorEditor({ products, onApply, onClose, saving }: {
@@ -1054,10 +1540,10 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
   onClose: () => void;
   saving: boolean;
 }) {
-  // Agrupa por configuracao de cores (produtos com mesmo conjunto)
   const groups = useMemo(() => {
     const map = new Map<string, { products: ParsedProduct[]; colors: ColorItem[] }>();
     for (const p of products) {
+      if (!p._needsColorSelection) continue;
       const key = p._colorConfigKey;
       if (!map.has(key)) map.set(key, { products: [], colors: [...p._availableColors] });
       map.get(key)!.products.push(p);
@@ -1066,6 +1552,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
       key, products: val.products, originalColors: val.colors,
     }));
   }, [products]);
+  const skipped = products.length - groups.reduce((s, g) => s + g.products.length, 0);
 
   const [groupColors, setGroupColors] = useState<Map<string, ColorItem[]>>(() => {
     const m = new Map();
@@ -1077,8 +1564,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
   const updateGroupColor = (groupKey: string, updater: (colors: ColorItem[]) => ColorItem[]) => {
     setGroupColors(prev => {
       const next = new Map(prev);
-      const current = next.get(groupKey) as ColorItem[] | undefined;
-      next.set(groupKey, updater(current || []));
+      next.set(groupKey, updater(next.get(groupKey) || []));
       return next;
     });
     setChangedGroups(prev => new Set(prev).add(groupKey));
@@ -1096,23 +1582,42 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
     onApply(updates);
   };
 
+  if (groups.length === 0) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-[95] flex items-center justify-center p-3" onClick={onClose}>
+        <div className="bg-white rounded-2xl p-5 max-w-sm" onClick={e => e.stopPropagation()}>
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={20} className="text-amber-500 shrink-0" />
+            <div>
+              <p className="font-bold text-zinc-900 text-sm">Nenhum produto elegivel</p>
+              <p className="text-[12px] text-zinc-600 mt-1">
+                Os produtos selecionados nao aceitam variacao de cor (linhas 50/100/200j, carretilhas, camisas, bones).
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="mt-4 w-full py-2.5 rounded-xl bg-zinc-900 text-white text-sm font-bold">
+            Entendi
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div
-        className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-xl max-h-[88vh] overflow-hidden flex flex-col"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="sticky top-0 bg-white border-b border-zinc-100 px-4 py-3 flex items-center justify-between shrink-0 gap-2">
+    <div className="fixed inset-0 bg-black/50 z-[95] flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-xl max-h-[88vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-zinc-100 px-4 py-3 flex items-center justify-between gap-2 shrink-0">
           <div className="min-w-0 flex-1">
             <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
               <Palette size={18} className="text-purple-600 shrink-0" />
               <span className="truncate">Editar Cores em Massa</span>
             </h3>
             <p className="text-[11px] text-zinc-500 mt-0.5 truncate">
-              {products.length} produto(s) em {groups.length} grupo(s) de configuracao
+              {products.length - skipped} produto(s) em {groups.length} grupo(s)
+              {skipped > 0 && <span className="text-amber-600"> - {skipped} sem cor ignorado(s)</span>}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl shrink-0">
+          <button onClick={onClose} className="p-2 text-zinc-400 rounded-xl shrink-0">
             <X size={18} />
           </button>
         </div>
@@ -1139,32 +1644,20 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
                       )}
                     </div>
                   </div>
-                  {isChanged && (
-                    <span className="text-[9px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold shrink-0">Modificado</span>
-                  )}
+                  {isChanged && <span className="text-[9px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold shrink-0">Modificado</span>}
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">Cores Atuais</p>
+                  <p className="text-[10px] font-semibold text-zinc-400 mb-1.5 uppercase tracking-wider">Cores</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {colors.length === 0 ? (
-                      <span className="text-[11px] text-zinc-400 italic">Sem cores</span>
-                    ) : colors.map(c => (
+                    {colors.length === 0 ? <span className="text-[11px] text-zinc-400 italic">Sem cores</span> : colors.map(c => (
                       <div key={c.name} className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-medium ${c.in_stock ? 'bg-white border-zinc-200 text-zinc-700' : 'bg-red-50 border-red-200 text-red-500'}`}>
                         <ColorDot name={c.name} hex={c.hex} />
                         <span className={!c.in_stock ? 'line-through' : ''}>{c.name}</span>
-                        <button
-                          onClick={() => updateGroupColor(group.key, prev => prev.map(cc => cc.name === c.name ? { ...cc, in_stock: !cc.in_stock } : cc))}
-                          className={`p-0.5 rounded ${c.in_stock ? 'text-zinc-400' : 'text-emerald-500'}`}
-                          title={c.in_stock ? 'Marcar sem estoque' : 'Marcar em estoque'}
-                        >
+                        <button onClick={() => updateGroupColor(group.key, prev => prev.map(cc => cc.name === c.name ? { ...cc, in_stock: !cc.in_stock } : cc))} className={`p-0.5 ${c.in_stock ? 'text-zinc-400' : 'text-emerald-500'}`} aria-label="Alternar estoque">
                           {c.in_stock ? <EyeOff size={11} /> : <Eye size={11} />}
                         </button>
-                        <button
-                          onClick={() => updateGroupColor(group.key, prev => prev.filter(cc => cc.name !== c.name))}
-                          className="p-0.5 text-zinc-300 hover:text-red-500"
-                          title="Remover cor"
-                        >
+                        <button onClick={() => updateGroupColor(group.key, prev => prev.filter(cc => cc.name !== c.name))} className="p-0.5 text-zinc-300 hover:text-red-500" aria-label="Remover">
                           <X size={11} />
                         </button>
                       </div>
@@ -1179,7 +1672,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
                       <button
                         key={ac.name}
                         onClick={() => updateGroupColor(group.key, prev => [...prev, { name: ac.name, hex: ac.hex, in_stock: true }])}
-                        className="flex items-center gap-1 px-2 py-1 rounded-lg border border-dashed border-zinc-300 text-[10px] text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors"
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg border border-dashed border-zinc-300 text-[10px] text-zinc-500 hover:border-emerald-400 hover:text-emerald-600"
                       >
                         <Plus size={10} /><ColorDot name={ac.name} hex={ac.hex} /><span>{ac.name}</span>
                       </button>
@@ -1195,12 +1688,12 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
           <button
             onClick={handleApply}
             disabled={saving || changedGroups.size === 0}
-            className="flex-1 bg-purple-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors min-w-0"
+            className="flex-1 bg-purple-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2 min-w-0"
           >
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
             <span className="truncate">{saving ? 'Salvando...' : `Salvar (${changedGroups.size})`}</span>
           </button>
-          <button onClick={onClose} className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors shrink-0">
+          <button onClick={onClose} className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 shrink-0">
             Cancelar
           </button>
         </div>
@@ -1210,90 +1703,7 @@ function BulkColorEditor({ products, onApply, onClose, saving }: {
 }
 
 // ============================================================================
-// BULK STATUS MODAL
-// ============================================================================
-
-function BulkStatusModal({ products, onApply, onClose, saving }: {
-  products: ParsedProduct[];
-  onApply: (productIds: string[], newStatus: string) => void;
-  onClose: () => void;
-  saving: boolean;
-}) {
-  const publishedCount = products.filter(p => p.status === 'published').length;
-  const draftCount = products.filter(p => p.status === 'draft').length;
-  const [confirmUnpub, setConfirmUnpub] = useState(false);
-
-  return (
-    <>
-      <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-        <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-          <div className="px-4 py-3 border-b border-zinc-100">
-            <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
-              <Globe size={18} className="text-blue-600 shrink-0" />
-              <span className="truncate">Alterar Status em Massa</span>
-            </h3>
-            <p className="text-[11px] text-zinc-500 mt-0.5">
-              {products.length} produto(s): {publishedCount} publicado(s), {draftCount} rascunho(s)
-            </p>
-          </div>
-
-          <div className="px-4 py-4 space-y-2.5">
-            <button
-              onClick={() => onApply(products.map(p => p.id), 'published')}
-              disabled={saving}
-              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-zinc-200 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all text-left"
-            >
-              <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
-                <Globe size={18} className="text-emerald-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-zinc-900">Publicar Todos</p>
-                <p className="text-[11px] text-zinc-500 truncate">{products.length} produto(s) visiveis na loja</p>
-              </div>
-              {saving ? <Loader2 size={16} className="animate-spin text-zinc-400 shrink-0" /> : <ChevronRight size={16} className="text-zinc-300 shrink-0" />}
-            </button>
-
-            <button
-              onClick={() => setConfirmUnpub(true)}
-              disabled={saving}
-              className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-zinc-200 hover:border-amber-400 hover:bg-amber-50/50 transition-all text-left"
-            >
-              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                <GlobeLock size={18} className="text-amber-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-zinc-900">Despublicar Todos</p>
-                <p className="text-[11px] text-zinc-500 truncate">Ocultar da loja (rascunho)</p>
-              </div>
-              <ChevronRight size={16} className="text-zinc-300 shrink-0" />
-            </button>
-          </div>
-
-          <div className="px-4 py-3 border-t border-zinc-100">
-            <button onClick={onClose} className="w-full px-4 py-2.5 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors">
-              Cancelar
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {confirmUnpub && (
-        <ConfirmModal
-          title="Despublicar produtos?"
-          message={<>Voce esta prestes a <strong>despublicar {products.length} produto(s)</strong>. Eles ficarao ocultos da loja publica ate serem publicados novamente. Deseja continuar?</>}
-          confirmLabel="Sim, despublicar"
-          danger
-          loading={saving}
-          onConfirm={() => { setConfirmUnpub(false); onApply(products.map(p => p.id), 'draft'); }}
-          onClose={() => setConfirmUnpub(false)}
-        />
-      )}
-    </>
-  );
-}
-
-// ============================================================================
-// QUICK BULK COLOR ACTIONS — agora filtra produtos que NAO aceitam cor
+// QUICK BULK COLOR (Add / Remove rapido)
 // ============================================================================
 
 function QuickBulkColorModal({
@@ -1308,13 +1718,10 @@ function QuickBulkColorModal({
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const eligible = products.filter(p => p._needsColorSelection);
   const skipped = products.length - eligible.length;
-
-  const toggleColor = (name: string) => {
-    setSelectedColors(prev => prev.includes(name) ? prev.filter(c => c !== name) : [...prev, name]);
-  };
+  const toggleColor = (name: string) => setSelectedColors(prev => prev.includes(name) ? prev.filter(c => c !== name) : [...prev, name]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-[95] flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between gap-2 shrink-0">
           <div className="min-w-0 flex-1">
@@ -1326,20 +1733,17 @@ function QuickBulkColorModal({
               {skipped > 0 && <span className="text-amber-600"> - {skipped} ignorado(s)</span>}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl shrink-0">
-            <X size={18} />
-          </button>
+          <button onClick={onClose} className="p-2 text-zinc-400 rounded-xl shrink-0"><X size={18} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {skipped > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[11px] text-amber-800 mb-3 flex items-start gap-2">
               <Info size={12} className="shrink-0 mt-0.5" />
-              <span>{skipped} produto(s) selecionado(s) nao aceitam variacao de cor (linhas 50/100/200j, carretilhas, camisas, bones) e serao ignorados.</span>
+              <span>{skipped} produto(s) sem variacao de cor serao pulados.</span>
             </div>
           )}
-
-          <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">Selecione as Cores</p>
+          <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">Selecione as cores</p>
           <div className="flex flex-wrap gap-1.5">
             {ALL_COLORS.map(c => {
               const isSelected = selectedColors.includes(c.name);
@@ -1364,14 +1768,16 @@ function QuickBulkColorModal({
           <button
             onClick={() => onApply(eligible.map(p => p.id), selectedColors, action)}
             disabled={saving || selectedColors.length === 0 || eligible.length === 0}
-            className={`flex-1 text-white px-4 py-3 rounded-xl text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 transition-colors min-w-0 ${
+            className={`flex-1 text-white px-4 py-3 rounded-xl text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 min-w-0 ${
               action === 'add' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
             }`}
           >
             {saving ? <Loader2 size={16} className="animate-spin" /> : action === 'add' ? <Plus size={16} /> : <Minus size={16} />}
-            <span className="truncate">{saving ? 'Aplicando...' : `${action === 'add' ? 'Add' : 'Remover'} ${selectedColors.length} em ${eligible.length}`}</span>
+            <span className="truncate">
+              {saving ? 'Aplicando...' : `${action === 'add' ? 'Add' : 'Remover'} ${selectedColors.length} em ${eligible.length}`}
+            </span>
           </button>
-          <button onClick={onClose} className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors shrink-0">
+          <button onClick={onClose} className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 shrink-0">
             Cancelar
           </button>
         </div>
@@ -1381,142 +1787,96 @@ function QuickBulkColorModal({
 }
 
 // ============================================================================
-// BULK RANK MODAL (NOVO) — definir ranking em massa
+// BULK RANK MODAL
 // ============================================================================
 
 function BulkRankModal({
   products, onApply, onClose, saving,
 }: {
   products: ParsedProduct[];
-  onApply: (productIds: string[], rank: number | null) => void;
+  onApply: (productIds: string[], rankOrOpts: number | null | { __sequential: true; start: number }) => void;
   onClose: () => void;
   saving: boolean;
 }) {
-  const [mode, setMode] = useState<'set' | 'clear' | 'sequential'>('set');
+  const [mode, setMode] = useState<'set' | 'clear' | 'sequential'>('sequential');
   const [rankValue, setRankValue] = useState('1');
   const [startValue, setStartValue] = useState('1');
 
-  const currentRanks = products.map(p => p._rank).filter(r => r !== null).sort((a, b) => (a as number) - (b as number));
-  const minRank = currentRanks[0] ?? null;
-  const maxRank = currentRanks[currentRanks.length - 1] ?? null;
-
   const handleApply = () => {
-    if (mode === 'clear') {
-      onApply(products.map(p => p.id), null);
-      return;
-    }
+    if (mode === 'clear') { onApply(products.map(p => p.id), null); return; }
     if (mode === 'set') {
       const n = Number(rankValue);
       if (isNaN(n) || n < 0) return;
-      // Todos recebem o mesmo rank (util quando se quer "empurrar pra cima" um conjunto)
       onApply(products.map(p => p.id), Math.floor(n));
       return;
     }
-    // sequential — aqui simulamos: cada produto recebe start+i. Como onApply aceita
-    // rank unico, fazemos chamadas individuais no handler pai (ver handleBulkRankApply).
-    // Enviamos como "set" mas com cada rank diferente via flag interna:
     const start = Number(startValue);
     if (isNaN(start) || start < 0) return;
-    // Marcamos sequencial com uma chamada especial — o pai cuida.
-    // Aqui passamos rank = -1 como sentinel e deixamos o pai interpretar.
-    // Para simplificar, faremos onApply varias vezes no pai; expoemos via window?
-    // Melhor: passar um objeto via JSON.
-    onApplySequential(products, Math.floor(start));
-  };
-
-  const onApplySequential = (prods: ParsedProduct[], start: number) => {
-    // Vamos chamar onApply em lote via "rank encoded" — mas como a assinatura nao
-    // permite isso, usamos um truque: chamamos onApply uma vez por produto.
-    // Na pratica, fazemos um loop no pai. Aqui expoe sinal:
-    (onApply as any)(prods.map(p => p.id), { __sequential: true, start });
+    onApply(products.map(p => p.id), { __sequential: true, start: Math.floor(start) });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-[95] flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-4 py-3 border-b border-zinc-100 flex items-center justify-between gap-2 shrink-0">
           <div className="min-w-0 flex-1">
             <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
               <TrendingUp size={18} className="text-amber-600 shrink-0" />
-              <span className="truncate">Ranking em Massa</span>
+              <span className="truncate">Posicao em massa</span>
             </h3>
-            <p className="text-[11px] text-zinc-500 mt-0.5 truncate">
-              {products.length} produto(s) selecionado(s)
-              {currentRanks.length > 0 && ` - ranks atuais: ${minRank} a ${maxRank}`}
-            </p>
+            <p className="text-[11px] text-zinc-500 mt-0.5">{products.length} produto(s)</p>
           </div>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-xl shrink-0">
-            <X size={18} />
-          </button>
+          <button onClick={onClose} className="p-2 text-zinc-400 rounded-xl shrink-0"><X size={18} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-          {/* Seletor de modo */}
-          <div className="flex flex-col gap-2">
-            <button
-              onClick={() => setMode('set')}
-              className={`w-full p-3 rounded-xl border text-left transition-all ${
-                mode === 'set' ? 'border-amber-400 bg-amber-50' : 'border-zinc-200 bg-white hover:border-zinc-300'
-              }`}
-            >
-              <p className="text-sm font-bold text-zinc-900 flex items-center gap-2">
-                <Hash size={14} /> Mesmo rank para todos
-              </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Ex.: colocar os 5 selecionados no topo (rank 1).</p>
-            </button>
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+          <ModeCard
+            active={mode === 'sequential'}
+            onClick={() => setMode('sequential')}
+            icon={<ListOrdered size={16} />}
+            title="Sequencial (recomendado)"
+            desc="Primeiro selecionado = #1, segundo = #2..."
+          />
+          <ModeCard
+            active={mode === 'set'}
+            onClick={() => setMode('set')}
+            icon={<Hash size={16} />}
+            title="Mesmo numero para todos"
+            desc="Todos recebem a mesma posicao."
+          />
+          <ModeCard
+            active={mode === 'clear'}
+            onClick={() => setMode('clear')}
+            icon={<X size={16} />}
+            title="Limpar posicao"
+            desc="Remove o rank - volta a ordem padrao."
+            danger
+          />
 
-            <button
-              onClick={() => setMode('sequential')}
-              className={`w-full p-3 rounded-xl border text-left transition-all ${
-                mode === 'sequential' ? 'border-amber-400 bg-amber-50' : 'border-zinc-200 bg-white hover:border-zinc-300'
-              }`}
-            >
-              <p className="text-sm font-bold text-zinc-900 flex items-center gap-2">
-                <ArrowUpDown size={14} /> Sequencial (1, 2, 3...)
-              </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Cada produto recebe um rank crescente a partir do valor inicial.</p>
-            </button>
-
-            <button
-              onClick={() => setMode('clear')}
-              className={`w-full p-3 rounded-xl border text-left transition-all ${
-                mode === 'clear' ? 'border-red-300 bg-red-50' : 'border-zinc-200 bg-white hover:border-zinc-300'
-              }`}
-            >
-              <p className="text-sm font-bold text-zinc-900 flex items-center gap-2">
-                <X size={14} /> Limpar ranking
-              </p>
-              <p className="text-[11px] text-zinc-500 mt-0.5">Remove o rank — produtos voltam para a ordem padrao.</p>
-            </button>
-          </div>
-
-          {/* Campo de valor (conforme o modo) */}
           {mode === 'set' && (
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Rank (menor = mais no topo)</label>
+            <Field label="Posicao">
               <input
                 type="number" inputMode="numeric" min="0" step="1"
                 value={rankValue}
                 onChange={e => setRankValue(e.target.value)}
-                className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                className={INPUT_CLASS}
                 placeholder="1"
               />
-            </div>
+            </Field>
           )}
           {mode === 'sequential' && (
-            <div>
-              <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Comecar do rank</label>
+            <Field label="Comecar em">
               <input
                 type="number" inputMode="numeric" min="0" step="1"
                 value={startValue}
                 onChange={e => setStartValue(e.target.value)}
-                className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                className={INPUT_CLASS}
                 placeholder="1"
               />
               <p className="text-[10px] text-zinc-500 mt-1">
-                Produtos na ordem atual da lista receberao {startValue || '?'}, {Number(startValue) + 1 || '?'}, {Number(startValue) + 2 || '?'}...
+                Produtos na ordem atual viram {startValue || '?'}, {Number(startValue) + 1 || '?'}, {Number(startValue) + 2 || '?'}...
               </p>
-            </div>
+            </Field>
           )}
         </div>
 
@@ -1524,14 +1884,14 @@ function BulkRankModal({
           <button
             onClick={handleApply}
             disabled={saving}
-            className="flex-1 bg-amber-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors min-w-0"
+            className="flex-1 bg-amber-600 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2 min-w-0"
           >
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
             <span className="truncate">
-              {saving ? 'Aplicando...' : mode === 'clear' ? 'Limpar rank' : mode === 'set' ? `Aplicar rank ${rankValue}` : 'Aplicar sequencial'}
+              {saving ? 'Aplicando...' : mode === 'clear' ? 'Limpar' : mode === 'set' ? `Aplicar #${rankValue}` : 'Aplicar sequencial'}
             </span>
           </button>
-          <button onClick={onClose} className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors shrink-0">
+          <button onClick={onClose} className="px-4 py-3 rounded-xl text-sm border border-zinc-200 text-zinc-600 shrink-0">
             Cancelar
           </button>
         </div>
@@ -1540,326 +1900,176 @@ function BulkRankModal({
   );
 }
 
+function ModeCard({
+  active, onClick, icon, title, desc, danger = false,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  danger?: boolean;
+}) {
+  const activeClass = danger ? 'border-red-300 bg-red-50' : 'border-amber-400 bg-amber-50';
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full p-3 rounded-xl border text-left transition-all flex items-start gap-2.5 ${
+        active ? activeClass : 'border-zinc-200 bg-white hover:border-zinc-300'
+      }`}
+    >
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+        danger ? 'bg-red-100 text-red-600' : active ? 'bg-amber-100 text-amber-700' : 'bg-zinc-100 text-zinc-500'
+      }`}>
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-bold text-zinc-900">{title}</p>
+        <p className="text-[11px] text-zinc-500 mt-0.5">{desc}</p>
+      </div>
+      {active && <Check size={16} className={danger ? 'text-red-500 shrink-0' : 'text-amber-600 shrink-0'} />}
+    </button>
+  );
+}
+
 // ============================================================================
-// PRODUCT CARD (mobile-first)
+// REORDER MODE
 // ============================================================================
 
-function ProductCard({
-  product, isSelected, onToggleSelect, onSaveColors, onStatusChange, onEdit, onQuickRank, saving,
+function ReorderMode({
+  products, onCancel, onSave, saving,
 }: {
-  product: ParsedProduct;
-  isSelected: boolean;
-  onToggleSelect: () => void;
-  onSaveColors: (productId: string, colors: ColorItem[]) => void;
-  onStatusChange: (productId: string, status: string) => void;
-  onEdit: (product: ParsedProduct) => void;
-  onQuickRank: (productId: string) => void;
+  products: ParsedProduct[];
+  onCancel: () => void;
+  onSave: (ordered: ParsedProduct[]) => void;
   saving: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [colors, setColors] = useState<ColorItem[]>(product._availableColors);
-  const [colorChanged, setColorChanged] = useState(false);
+  const initialOrder = () => {
+    return [...products].sort((a, b) => {
+      const ra = a._rank, rb = b._rank;
+      if (ra === null && rb === null) return 0;
+      if (ra === null) return 1;
+      if (rb === null) return -1;
+      return ra - rb;
+    });
+  };
+  const [order, setOrder] = useState<ParsedProduct[]>(initialOrder);
+  const [dirty, setDirty] = useState(false);
 
-  useEffect(() => {
-    setColors(product._availableColors);
-    setColorChanged(false);
-  }, [product._availableColors]);
-
-  const image = product.images?.[0]?.url || product.thumbnail || '';
-  const isMulticolor = product._isLine && !product._needsColorSelection;
-
-  const fakeP = { title: product.title, handle: product.handle, yards: product._yards } as any;
-  const groupColors = getDefaultColorsForGroup(fakeP);
+  const move = (idx: number, to: number) => {
+    if (to < 0 || to >= order.length) return;
+    setOrder(prev => {
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+    setDirty(true);
+  };
+  const moveTop = (idx: number) => move(idx, 0);
+  const moveBottom = (idx: number) => move(idx, order.length - 1);
+  const reset = () => { setOrder(initialOrder()); setDirty(false); };
 
   return (
-    <div className={`border-b border-zinc-100 last:border-b-0 transition-colors ${isSelected ? 'bg-blue-50/40' : ''}`}>
-      {/* Main row */}
-      <div className="flex items-start gap-2 px-3 py-2.5 min-h-[56px]">
-        <button onClick={onToggleSelect} className="shrink-0 p-1 touch-manipulation" aria-label="Selecionar">
-          {isSelected ? <CheckSquare size={20} className="text-blue-600" /> : <Square size={20} className="text-zinc-300" />}
+    <div className="fixed inset-0 bg-zinc-50 z-40 flex flex-col overflow-hidden">
+      <div className="bg-white border-b border-zinc-200 px-3 py-2.5 flex items-center gap-2 shrink-0 shadow-sm">
+        <button onClick={onCancel} className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-xl shrink-0" aria-label="Cancelar">
+          <ArrowLeft size={20} />
         </button>
-
-        <div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
-          {image ? (
-            <img src={image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-zinc-300"><Package size={14} /></div>
-          )}
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-bold text-zinc-900 flex items-center gap-1.5">
+            <ListOrdered size={14} className="text-amber-600 shrink-0" />
+            Reordenar produtos
+          </h2>
+          <p className="text-[10px] text-zinc-500 truncate">
+            {order.length} produto(s) - use as setas para reorganizar
+          </p>
         </div>
-
-        <div className="flex-1 min-w-0" onClick={() => setExpanded(!expanded)}>
-          <p className="text-[13px] font-medium text-zinc-900 leading-tight line-clamp-2 break-words">{product.title}</p>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[11px] font-semibold text-zinc-700">R$ {product._priceDisplay}</span>
-            {product._yards && <span className="text-[10px] text-zinc-400">{product._yards}j</span>}
-            <RankBadge rank={product._rank} />
-            {isMulticolor && (
-              <span className="text-[9px] bg-gradient-to-r from-red-100 via-yellow-100 to-blue-100 text-zinc-600 px-1.5 py-0.5 rounded-full font-medium border border-zinc-200/50">
-                Multicor
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="shrink-0 flex flex-col items-end gap-1">
-          <StatusBadge status={product.status} />
-          {product._isLine && product._needsColorSelection && (
-            <div className="flex items-center gap-1">
-              <ColorSourceBadge source={product._colorSource} />
-              <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-0.5 text-[10px] text-purple-600 font-medium">
-                <Palette size={10} />
-                {product._availableColors.filter(c => c.in_stock).length}/{product._availableColors.length}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <button onClick={() => setExpanded(!expanded)} className="shrink-0 p-1 text-zinc-300 touch-manipulation" aria-label="Expandir">
-          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        {dirty && (
+          <button onClick={reset} className="px-2.5 py-2 rounded-xl text-xs font-medium text-zinc-500 hover:bg-zinc-100 shrink-0">
+            Desfazer
+          </button>
+        )}
+        <button
+          onClick={() => onSave(order)}
+          disabled={!dirty || saving}
+          className="bg-amber-600 text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          Salvar ordem
         </button>
       </div>
 
-      {/* Expanded */}
-      {expanded && (
-        <div className="px-3 pb-3 pl-3 sm:pl-[52px] space-y-3">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500 min-w-0">
-            <span className="truncate max-w-full">Handle: <span className="text-zinc-700 font-mono break-all">{product.handle}</span></span>
-            {product._fio && <span>Fio: <span className="text-zinc-700">{product._fio}</span></span>}
-            {product._stock !== null && (
-              <span>Estoque: <span className={`font-semibold ${product._stock <= 0 ? 'text-red-600' : 'text-zinc-700'}`}>{product._stock}</span></span>
-            )}
-            <span>Grupo: <span className="text-zinc-700">{product._group}</span></span>
-            {product._colorGroup && <span>Linha: <span className="text-zinc-700">{product._colorGroup}</span></span>}
-            <span>Rank: <span className="text-zinc-700 font-semibold">{product._rank !== null ? `#${product._rank}` : '—'}</span></span>
-          </div>
+      <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 text-[11px] text-amber-900 shrink-0">
+        A ordem aqui vira a posicao na loja. Primeiro = <strong>#1</strong> (topo), segundo = #2, e assim por diante.
+      </div>
 
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500">
-            <span className="flex items-center gap-0.5"><Ruler size={10} /> {product._shippingHeight}x{product._shippingWidth}x{product._shippingLength}cm</span>
-            <span className="flex items-center gap-0.5"><Weight size={10} /> {product._shippingWeight}kg</span>
-            <span>Imgs: {product.images?.length || 0}</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              onClick={() => onEdit(product)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-all"
-            >
-              <Pencil size={12} /> Editar
-            </button>
-
-            <button
-              onClick={() => onQuickRank(product.id)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-all"
-            >
-              <TrendingUp size={12} /> Rank
-            </button>
-
-            <button
-              onClick={() => onStatusChange(product.id, product.status === 'published' ? 'draft' : 'published')}
-              disabled={saving}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${
-                product.status === 'published'
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700'
-                  : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700'
-              }`}
-            >
-              {product.status === 'published' ? <><EyeOff size={12} /> Despublicar</> : <><Eye size={12} /> Publicar</>}
-            </button>
-          </div>
-
-          {/* Editor de cores inline — só para produtos que aceitam cor */}
-          {product._isLine && product._needsColorSelection && (
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold text-zinc-500 flex items-center gap-1">
-                <Palette size={12} /> Cores Disponiveis
-                <ColorSourceBadge source={product._colorSource} />
-              </p>
-
-              {product._colorSource === 'derived' && (
-                <p className="text-[10px] text-blue-700 bg-blue-50 rounded-lg px-2 py-1 border border-blue-100">
-                  Cores pre-preenchidas automaticamente. Edite e salve para refletir na loja.
-                </p>
-              )}
-
-              <div className="flex flex-wrap gap-1.5">
-                {colors.length === 0 ? (
-                  <span className="text-[11px] text-zinc-400 italic">Sem cores definidas</span>
-                ) : colors.map(c => (
-                  <div key={c.name} className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-medium ${c.in_stock ? 'bg-white border-zinc-200 text-zinc-700' : 'bg-red-50 border-red-200 text-red-400'}`}>
-                    <ColorDot name={c.name} hex={c.hex} />
-                    <span className={!c.in_stock ? 'line-through' : ''}>{c.name}</span>
-                    <button
-                      onClick={() => {
-                        setColors(prev => prev.map(cc => cc.name === c.name ? { ...cc, in_stock: !cc.in_stock } : cc));
-                        setColorChanged(true);
-                      }}
-                      className="p-0.5"
-                      aria-label="Alternar estoque"
-                    >
-                      {c.in_stock ? <EyeOff size={10} className="text-zinc-400" /> : <Eye size={10} className="text-emerald-500" />}
-                    </button>
-                    <button
-                      onClick={() => { setColors(prev => prev.filter(cc => cc.name !== c.name)); setColorChanged(true); }}
-                      className="p-0.5 text-zinc-300 hover:text-red-500"
-                      aria-label="Remover cor"
-                    >
-                      <X size={10} />
-                    </button>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="max-w-2xl mx-auto px-2 py-2">
+          {order.map((p, idx) => {
+            const image = p.images?.[0]?.url || p.thumbnail || '';
+            return (
+              <div key={p.id} className="bg-white rounded-xl border border-zinc-200 mb-1.5 p-2 flex items-center gap-2 shadow-sm">
+                <div className="shrink-0 w-9 flex flex-col items-center">
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Pos</span>
+                  <span className="text-lg font-black text-amber-600 leading-none">{idx + 1}</span>
+                </div>
+                <div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                  {image
+                    ? <img src={image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    : <div className="w-full h-full flex items-center justify-center text-zinc-300"><Package size={12} /></div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-semibold text-zinc-900 truncate">{p.title}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <StatusDot status={p.status} />
+                    <span className="text-[10px] text-zinc-500">R$ {p._priceDisplay}</span>
+                    {p._yards && <span className="text-[10px] text-zinc-400">{p._yards}j</span>}
                   </div>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-1">
-                {groupColors.filter(gc => !colors.find(c => c.name === gc.name)).map(gc => (
+                </div>
+                <div className="flex flex-col gap-0.5 shrink-0">
                   <button
-                    key={gc.name}
-                    onClick={() => { setColors(prev => [...prev, { name: gc.name, hex: gc.hex, in_stock: true }]); setColorChanged(true); }}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg border border-dashed border-zinc-300 text-[10px] text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors"
+                    onClick={() => move(idx, idx - 1)}
+                    disabled={idx === 0}
+                    className="w-8 h-6 flex items-center justify-center rounded-md bg-zinc-100 text-zinc-600 hover:bg-amber-100 hover:text-amber-700 disabled:opacity-30 disabled:hover:bg-zinc-100 touch-manipulation"
+                    aria-label="Subir"
                   >
-                    <Plus size={9} /> <ColorDot name={gc.name} hex={gc.hex} /> {gc.name}
+                    <ArrowUp size={14} />
                   </button>
-                ))}
+                  <button
+                    onClick={() => move(idx, idx + 1)}
+                    disabled={idx === order.length - 1}
+                    className="w-8 h-6 flex items-center justify-center rounded-md bg-zinc-100 text-zinc-600 hover:bg-amber-100 hover:text-amber-700 disabled:opacity-30 disabled:hover:bg-zinc-100 touch-manipulation"
+                    aria-label="Descer"
+                  >
+                    <ArrowDown size={14} />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-0.5 shrink-0">
+                  <button
+                    onClick={() => moveTop(idx)}
+                    disabled={idx === 0}
+                    className="w-8 h-6 flex items-center justify-center rounded-md bg-zinc-100 text-zinc-600 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-30 disabled:hover:bg-zinc-100 touch-manipulation"
+                    aria-label="Ao topo"
+                    title="Topo"
+                  >
+                    <ChevronUp size={14} />
+                  </button>
+                  <button
+                    onClick={() => moveBottom(idx)}
+                    disabled={idx === order.length - 1}
+                    className="w-8 h-6 flex items-center justify-center rounded-md bg-zinc-100 text-zinc-600 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-30 disabled:hover:bg-zinc-100 touch-manipulation"
+                    aria-label="Ao final"
+                    title="Base"
+                  >
+                    <ChevronDown size={14} />
+                  </button>
+                </div>
               </div>
-
-              {colorChanged && (
-                <button
-                  onClick={() => { onSaveColors(product.id, colors); setColorChanged(false); }}
-                  disabled={saving}
-                  className="bg-purple-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
-                >
-                  {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                  Salvar Cores
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// QUICK RANK POPUP (para produto individual)
-// ============================================================================
-
-function QuickRankPopup({
-  product, onApply, onClose, saving,
-}: {
-  product: ParsedProduct;
-  onApply: (productId: string, rank: number | null) => void;
-  onClose: () => void;
-  saving: boolean;
-}) {
-  const [rank, setRank] = useState(product._rank !== null ? String(product._rank) : '');
-
-  const handleApply = () => {
-    if (rank.trim() === '') {
-      onApply(product.id, null);
-      return;
-    }
-    const n = Number(rank);
-    if (!isNaN(n) && n >= 0) onApply(product.id, Math.floor(n));
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[80] flex items-end sm:items-center justify-center p-3" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full sm:max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-4 py-3 border-b border-zinc-100">
-          <h3 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
-            <TrendingUp size={16} className="text-amber-600 shrink-0" />
-            <span className="truncate">Rank rapido</span>
-          </h3>
-          <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{product.title}</p>
-        </div>
-        <div className="px-4 py-3 space-y-2">
-          <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Posicao (menor = mais no topo)</label>
-          <input
-            type="number" inputMode="numeric" min="0" step="1"
-            value={rank}
-            onChange={e => setRank(e.target.value)}
-            className="w-full px-3 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-amber-500 outline-none"
-            placeholder="Ex: 1, 2, 3... (vazio = sem rank)"
-            autoFocus
-          />
-          <p className="text-[10px] text-zinc-500">Deixe vazio para remover o ranking deste produto.</p>
-        </div>
-        <div className="px-4 py-3 border-t border-zinc-100 flex gap-2">
-          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl text-sm border border-zinc-200 text-zinc-600 hover:border-zinc-400 transition-colors">
-            Cancelar
-          </button>
-          <button
-            onClick={handleApply}
-            disabled={saving}
-            className="flex-1 bg-amber-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Salvar
-          </button>
+            );
+          })}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// ACTIVE FILTER CHIPS
-// ============================================================================
-
-function ActiveFilterChips({
-  groupFilter, statusFilter, searchQuery,
-  onRemoveGroup, onRemoveStatus, onRemoveSearch, onClearAll,
-}: {
-  groupFilter: string;
-  statusFilter: string;
-  searchQuery: string;
-  onRemoveGroup: () => void;
-  onRemoveStatus: () => void;
-  onRemoveSearch: () => void;
-  onClearAll: () => void;
-}) {
-  const hasFilters = groupFilter !== 'all' || statusFilter !== 'all' || searchQuery.trim() !== '';
-  if (!hasFilters) return null;
-
-  const statusLabels: Record<string, string> = {
-    published: 'Publicados',
-    draft: 'Rascunhos',
-    no_colors: 'Sem Cores',
-    has_colors: 'Com Cores',
-    multicolor: 'Multicor',
-    derived_colors: 'Auto-derivadas',
-    saved_colors: 'Cores Salvas',
-    with_rank: 'Com Rank',
-    no_rank: 'Sem Rank',
-  };
-
-  return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide max-w-full">
-      <span className="text-[10px] text-zinc-400 font-medium shrink-0">Filtros:</span>
-      {searchQuery.trim() && (
-        <button onClick={onRemoveSearch} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-medium shrink-0 hover:bg-blue-100 transition-colors max-w-[200px]">
-          <Search size={10} />
-          <span className="truncate">"{searchQuery}"</span>
-          <X size={10} className="text-blue-400 hover:text-blue-700 shrink-0" />
-        </button>
-      )}
-      {groupFilter !== 'all' && (
-        <button onClick={onRemoveGroup} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 text-[11px] font-medium shrink-0 hover:bg-purple-100 transition-colors">
-          <Folder size={10} />
-          <span className="truncate max-w-[120px]">{groupFilter}</span>
-          <X size={10} className="text-purple-400 hover:text-purple-700 shrink-0" />
-        </button>
-      )}
-      {statusFilter !== 'all' && (
-        <button onClick={onRemoveStatus} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-medium shrink-0 hover:bg-amber-100 transition-colors">
-          <Filter size={10} />
-          {statusLabels[statusFilter] || statusFilter}
-          <X size={10} className="text-amber-400 hover:text-amber-700 shrink-0" />
-        </button>
-      )}
-      <button onClick={onClearAll} className="text-[10px] text-zinc-400 hover:text-red-500 font-medium shrink-0 px-1.5 py-1 transition-colors">
-        Limpar tudo
-      </button>
     </div>
   );
 }
@@ -1875,23 +2085,28 @@ export default function AdminProducts() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [showFilters, setShowFilters] = useState(false);
-  const [sortByRank, setSortByRank] = useState(true); // NOVO: ordenar por rank por padrao
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
+  const [sortByRank, setSortByRank] = useState(true);
 
+  const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const [showBulkSheet, setShowBulkSheet] = useState(false);
   const [showBulkColors, setShowBulkColors] = useState(false);
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [showBulkRank, setShowBulkRank] = useState(false);
   const [quickBulkAction, setQuickBulkAction] = useState<'add' | 'remove' | null>(null);
+
   const [editingProduct, setEditingProduct] = useState<ParsedProduct | null | undefined>(undefined);
   const [editSaving, setEditSaving] = useState(false);
-  const [quickRankProductId, setQuickRankProductId] = useState<string | null>(null);
 
-  const searchRef = useRef<HTMLInputElement>(null);
+  const [actionSheetProduct, setActionSheetProduct] = useState<ParsedProduct | null>(null);
+  const [quickRankProductId, setQuickRankProductId] = useState<string | null>(null);
 
   useEffect(() => { loadProducts(); }, []);
 
@@ -1909,7 +2124,6 @@ export default function AdminProducts() {
         total = data.count || all.length;
         offset += limit;
       } while (offset < total);
-
       setProducts(all.map(parseProduct));
     } catch (err: any) {
       if (err.message?.includes('autenticado') || err.message?.includes('expirada')) {
@@ -1927,9 +2141,6 @@ export default function AdminProducts() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ============ HANDLERS ============
-
-  // Helper: salva metadata preservando o que existe
   const patchMetadata = async (productId: string, patch: Record<string, any>) => {
     const productData = await adminFetch(`/admin/produtos-custom/${productId}`);
     const currentMetadata = productData.product?.metadata || {};
@@ -1940,29 +2151,6 @@ export default function AdminProducts() {
     if (!result.success) throw new Error(result.errors?.join(', ') || 'Erro');
     return { ...currentMetadata, ...patch };
   };
-
-  const handleSaveColors = useCallback(async (productId: string, colors: ColorItem[]) => {
-    setSavingId(productId);
-    try {
-      const newMeta = await patchMetadata(productId, { available_colors: colors });
-      setProducts(prev => prev.map(p =>
-        p.id === productId
-          ? {
-              ...p,
-              _availableColors: colors,
-              metadata: newMeta,
-              _colorConfigKey: colors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE',
-              _colorSource: 'metadata' as const,
-            }
-          : p
-      ));
-      showToast('Cores salvas! Refletem na loja publica.', 'success');
-    } catch (err: any) {
-      showToast(`Erro: ${err.message}`, 'error');
-    } finally {
-      setSavingId(null);
-    }
-  }, []);
 
   const handleStatusChange = useCallback(async (productId: string, newStatus: string) => {
     setSavingId(productId);
@@ -1981,16 +2169,13 @@ export default function AdminProducts() {
     }
   }, []);
 
-  // Rank quick update — para um produto so
   const handleQuickRankApply = useCallback(async (productId: string, rank: number | null) => {
     setSavingId(productId);
     try {
       const newMeta = await patchMetadata(productId, { rank });
-      setProducts(prev => prev.map(p =>
-        p.id === productId ? { ...p, metadata: newMeta, _rank: rank } : p
-      ));
+      setProducts(prev => prev.map(p => p.id === productId ? { ...p, metadata: newMeta, _rank: rank } : p));
       setQuickRankProductId(null);
-      showToast(rank === null ? 'Ranking removido' : `Rank atualizado para #${rank}`, 'success');
+      showToast(rank === null ? 'Posicao removida' : `Posicao atualizada: #${rank}`, 'success');
     } catch (err: any) {
       showToast(`Erro: ${err.message}`, 'error');
     } finally {
@@ -1998,7 +2183,6 @@ export default function AdminProducts() {
     }
   }, []);
 
-  // Bulk status
   const handleBulkStatusApply = useCallback(async (productIds: string[], newStatus: string) => {
     setBulkSaving(true);
     let ok = 0, fail = 0;
@@ -2017,13 +2201,13 @@ export default function AdminProducts() {
     setBulkSaving(false);
     setShowBulkStatus(false);
     setSelectedIds(new Set());
+    setSelectionMode(false);
     showToast(
       fail === 0 ? `${ok} produto(s) ${newStatus === 'published' ? 'publicado(s)' : 'despublicado(s)'}!` : `${ok} OK, ${fail} erro(s)`,
       fail === 0 ? 'success' : 'error'
     );
   }, []);
 
-  // Bulk color apply (agrupado)
   const handleBulkColorApply = useCallback(async (updates: { productId: string; colors: ColorItem[] }[]) => {
     setBulkSaving(true);
     let ok = 0, fail = 0;
@@ -2042,13 +2226,13 @@ export default function AdminProducts() {
     setBulkSaving(false);
     setShowBulkColors(false);
     setSelectedIds(new Set());
+    setSelectionMode(false);
     showToast(
       fail === 0 ? `Cores atualizadas em ${ok} produto(s)!` : `${ok} OK, ${fail} erro(s)`,
       fail === 0 ? 'success' : 'error'
     );
   }, []);
 
-  // Quick bulk add/remove cor
   const handleQuickBulkColorApply = useCallback(async (productIds: string[], colorNames: string[], action: string) => {
     setBulkSaving(true);
     let ok = 0, fail = 0;
@@ -2057,7 +2241,6 @@ export default function AdminProducts() {
       try {
         const productData = await adminFetch(`/admin/produtos-custom/${pid}`);
         const currentMetadata = productData.product?.metadata || {};
-
         let currentColors: ColorItem[] = currentMetadata.available_colors || [];
         if (currentColors.length === 0) {
           const product = products.find(p => p.id === pid);
@@ -2065,7 +2248,6 @@ export default function AdminProducts() {
             currentColors = [...product._availableColors];
           }
         }
-
         if (action === 'add') {
           for (const name of colorNames) {
             if (!currentColors.find(c => c.name === name)) {
@@ -2075,12 +2257,10 @@ export default function AdminProducts() {
         } else if (action === 'remove') {
           currentColors = currentColors.filter(c => !colorNames.includes(c.name));
         }
-
         const result = await adminFetch(`/admin/produtos-custom/${pid}`, {
           method: 'POST',
           body: JSON.stringify({ metadata: { ...currentMetadata, available_colors: currentColors } }),
         });
-
         if (result.success) {
           ok++;
           const configKey = currentColors.map(c => `${c.name}:${c.in_stock ? '1' : '0'}`).sort().join('|') || 'NONE';
@@ -2096,48 +2276,63 @@ export default function AdminProducts() {
     setBulkSaving(false);
     setQuickBulkAction(null);
     setSelectedIds(new Set());
+    setSelectionMode(false);
     showToast(
       fail === 0 ? `Cores ${action === 'add' ? 'adicionadas' : 'removidas'} em ${ok} produto(s)!` : `${ok} OK, ${fail} erro(s)`,
       fail === 0 ? 'success' : 'error'
     );
   }, [products]);
 
-  // Bulk rank — aceita numero unico OU objeto { __sequential, start } (do BulkRankModal)
   const handleBulkRankApply = useCallback(async (productIds: string[], rankOrOpts: number | null | { __sequential: true; start: number }) => {
     setBulkSaving(true);
     let ok = 0, fail = 0;
     const isSequential = rankOrOpts !== null && typeof rankOrOpts === 'object' && (rankOrOpts as any).__sequential;
     const startValue = isSequential ? (rankOrOpts as any).start : 0;
 
-    // Para sequencial, a ordem dos productIds importa. Vem da selecao na lista atual.
     for (let i = 0; i < productIds.length; i++) {
       const pid = productIds[i];
       const rankToSet: number | null = isSequential ? startValue + i : (rankOrOpts as number | null);
       try {
         const newMeta = await patchMetadata(pid, { rank: rankToSet });
         ok++;
-        setProducts(prev => prev.map(p =>
-          p.id === pid ? { ...p, metadata: newMeta, _rank: rankToSet } : p
-        ));
+        setProducts(prev => prev.map(p => p.id === pid ? { ...p, metadata: newMeta, _rank: rankToSet } : p));
       } catch { fail++; }
     }
 
     setBulkSaving(false);
     setShowBulkRank(false);
     setSelectedIds(new Set());
+    setSelectionMode(false);
     showToast(
       fail === 0
-        ? isSequential
-          ? `Rank sequencial aplicado em ${ok} produto(s)!`
-          : rankOrOpts === null
-            ? `Rank limpo em ${ok} produto(s)`
-            : `Rank #${rankOrOpts} aplicado em ${ok} produto(s)!`
+        ? isSequential ? `Posicao sequencial aplicada em ${ok} produto(s)!`
+        : rankOrOpts === null ? `Posicao removida de ${ok} produto(s)` : `Posicao #${rankOrOpts} aplicada em ${ok} produto(s)!`
         : `${ok} OK, ${fail} erro(s)`,
       fail === 0 ? 'success' : 'error'
     );
   }, []);
 
-  // Product save (create/update)
+  const handleReorderSave = useCallback(async (ordered: ParsedProduct[]) => {
+    setBulkSaving(true);
+    let ok = 0, fail = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      const p = ordered[i];
+      const newRank = i + 1;
+      if (p._rank === newRank) { ok++; continue; }
+      try {
+        const newMeta = await patchMetadata(p.id, { rank: newRank });
+        ok++;
+        setProducts(prev => prev.map(pp => pp.id === p.id ? { ...pp, metadata: newMeta, _rank: newRank } : pp));
+      } catch { fail++; }
+    }
+    setBulkSaving(false);
+    setViewMode('list');
+    showToast(
+      fail === 0 ? `Ordem salva em ${ok} produto(s)!` : `${ok} OK, ${fail} erro(s)`,
+      fail === 0 ? 'success' : 'error'
+    );
+  }, []);
+
   const handleProductSave = useCallback(async (data: any) => {
     setEditSaving(true);
     try {
@@ -2170,7 +2365,7 @@ export default function AdminProducts() {
         loadProducts();
       } else {
         const productId = editingProduct?.id;
-        if (!productId) throw new Error('ID do produto nao encontrado');
+        if (!productId) throw new Error('ID nao encontrado');
 
         const productData = await adminFetch(`/admin/produtos-custom/${productId}`);
         const currentMetadata = productData.product?.metadata || {};
@@ -2184,7 +2379,6 @@ export default function AdminProducts() {
         };
         if (data.grupo) metadataUpdate.grupo = data.grupo;
         if (data.colors !== undefined) metadataUpdate.available_colors = data.colors;
-        // rank: sempre atualiza (inclusive para null, que remove)
         metadataUpdate.rank = data.rank;
 
         const updatePayload: any = {
@@ -2224,7 +2418,6 @@ export default function AdminProducts() {
     }
   }, [editingProduct]);
 
-  // Selection
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -2233,15 +2426,6 @@ export default function AdminProducts() {
     });
   };
 
-  const selectAll = () => {
-    if (selectedIds.size === filteredProducts.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filteredProducts.map(p => p.id)));
-    }
-  };
-
-  // ============ FILTERED + SORTED PRODUCTS ============
   const filteredProducts = useMemo(() => {
     let result = products;
 
@@ -2254,9 +2438,7 @@ export default function AdminProducts() {
       );
     }
 
-    if (groupFilter !== 'all') {
-      result = result.filter(p => p._group === groupFilter);
-    }
+    if (groupFilter !== 'all') result = result.filter(p => p._group === groupFilter);
 
     if (statusFilter === 'published') result = result.filter(p => p.status === 'published');
     else if (statusFilter === 'draft') result = result.filter(p => p.status === 'draft');
@@ -2267,16 +2449,15 @@ export default function AdminProducts() {
     else if (statusFilter === 'saved_colors') result = result.filter(p => p._colorSource === 'metadata');
     else if (statusFilter === 'with_rank') result = result.filter(p => p._rank !== null);
     else if (statusFilter === 'no_rank') result = result.filter(p => p._rank === null);
+    else if (statusFilter === 'out_of_stock') result = result.filter(p => p._stock !== null && p._stock <= 0);
 
-    // Ordenar por rank — produtos com rank primeiro (asc), depois sem rank (ordem original)
     if (sortByRank) {
       result = [...result].sort((a, b) => {
-        const ra = a._rank;
-        const rb = b._rank;
+        const ra = a._rank, rb = b._rank;
         if (ra === null && rb === null) return 0;
-        if (ra === null) return 1;   // sem rank vai para baixo
-        if (rb === null) return -1;  // com rank vai para cima
-        return ra - rb;              // menor rank primeiro
+        if (ra === null) return 1;
+        if (rb === null) return -1;
+        return ra - rb;
       });
     }
 
@@ -2292,78 +2473,53 @@ export default function AdminProducts() {
     total: products.length,
     published: products.filter(p => p.status === 'published').length,
     draft: products.filter(p => p.status === 'draft').length,
-    lines: products.filter(p => p._isLine).length,
     noColors: products.filter(p => p._isLine && p._needsColorSelection && p._availableColors.length === 0).length,
-    multicolor: products.filter(p => p._isLine && !p._needsColorSelection).length,
-    derivedColors: products.filter(p => p._colorSource === 'derived').length,
-    savedColors: products.filter(p => p._colorSource === 'metadata').length,
     withRank: products.filter(p => p._rank !== null).length,
+    outOfStock: products.filter(p => p._stock !== null && p._stock <= 0).length,
   }), [products]);
 
   const selectedProducts = filteredProducts.filter(p => selectedIds.has(p.id));
   const hasSelection = selectedIds.size > 0;
-  const quickRankProduct = quickRankProductId ? products.find(p => p.id === quickRankProductId) || null : null;
+
+  const selectAll = () => {
+    if (selectedIds.size === filteredProducts.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredProducts.map(p => p.id)));
+  };
+
+  const hasActiveFilter = groupFilter !== 'all' || statusFilter !== 'all' || searchQuery.trim() !== '';
+
+  if (viewMode === 'reorder') {
+    return (
+      <>
+        <ReorderMode
+          products={filteredProducts}
+          onCancel={() => setViewMode('list')}
+          onSave={handleReorderSave}
+          saving={bulkSaving}
+        />
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </>
+    );
+  }
 
   return (
-    <div className="space-y-3 pb-24 overflow-x-hidden">
-      {/* ============ STATS ROW ============ */}
-      <div className="grid grid-cols-3 gap-2">
-        <div className="bg-white rounded-xl border border-zinc-100 p-2 sm:p-2.5 text-center">
-          <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Total</p>
-          <p className="text-lg sm:text-xl font-bold text-zinc-800">{stats.total}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-emerald-100 p-2 sm:p-2.5 text-center">
-          <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider">Publicados</p>
-          <p className="text-lg sm:text-xl font-bold text-emerald-700">{stats.published}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-amber-100 p-2 sm:p-2.5 text-center">
-          <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">Rascunhos</p>
-          <p className="text-lg sm:text-xl font-bold text-amber-700">{stats.draft}</p>
-        </div>
+    <div className="space-y-2.5 pb-24 overflow-x-hidden">
+      <div className="grid grid-cols-4 gap-1.5">
+        <StatTile label="Total" value={stats.total} tone="zinc" />
+        <StatTile label="Pub" value={stats.published} tone="emerald" />
+        <StatTile label="Rasc" value={stats.draft} tone="amber" />
+        <StatTile label="Rank" value={stats.withRank} tone="blue" />
       </div>
 
-      {/* Color + rank stats */}
-      {(stats.derivedColors > 0 || stats.savedColors > 0 || stats.withRank > 0) && (
-        <div className="flex gap-2 text-[10px] overflow-x-auto pb-0.5 -mx-1 px-1">
-          {stats.withRank > 0 && (
-            <span className="bg-amber-50 text-amber-700 px-2.5 py-1 rounded-lg border border-amber-200/60 font-medium shrink-0 flex items-center gap-1">
-              <TrendingUp size={10} /> {stats.withRank} com rank
-            </span>
-          )}
-          {stats.savedColors > 0 && (
-            <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200/60 font-medium shrink-0">
-              {stats.savedColors} cores salvas
-            </span>
-          )}
-          {stats.derivedColors > 0 && (
-            <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200/60 font-medium shrink-0">
-              {stats.derivedColors} auto-derivadas
-            </span>
-          )}
-          {stats.noColors > 0 && (
-            <span className="bg-zinc-50 text-zinc-500 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium shrink-0">
-              {stats.noColors} sem cores
-            </span>
-          )}
-          {stats.multicolor > 0 && (
-            <span className="bg-gradient-to-r from-red-50 via-yellow-50 to-blue-50 text-zinc-600 px-2.5 py-1 rounded-lg border border-zinc-200/60 font-medium shrink-0">
-              {stats.multicolor} multicor
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ============ SEARCH BAR ============ */}
-      <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm">
-        <div className="flex items-center gap-2 px-2.5 py-2 flex-wrap">
+      <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden">
+        <div className="flex items-center gap-1.5 px-2.5 py-2">
           <Search size={16} className="text-zinc-400 shrink-0" />
           <input
-            ref={searchRef}
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Buscar produtos..."
-            className="flex-1 min-w-[100px] text-sm outline-none bg-transparent text-zinc-900 placeholder:text-zinc-400"
+            placeholder="Buscar por nome, handle, grupo..."
+            className="flex-1 min-w-0 text-sm outline-none bg-transparent text-zinc-900 placeholder:text-zinc-400"
           />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')} className="p-1 text-zinc-300 hover:text-zinc-500 shrink-0">
@@ -2371,130 +2527,162 @@ export default function AdminProducts() {
             </button>
           )}
           <button
-            onClick={() => setSortByRank(s => !s)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all shrink-0 ${
-              sortByRank ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-zinc-50 border-zinc-200 text-zinc-500'
-            }`}
-            title={sortByRank ? 'Ordem: por rank' : 'Ordem: padrao'}
-          >
-            <ArrowUpDown size={12} />
-            {sortByRank ? 'Rank' : 'Padrao'}
-          </button>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all shrink-0 ${
-              showFilters || groupFilter !== 'all' || statusFilter !== 'all'
-                ? 'bg-blue-50 border-blue-200 text-blue-700'
-                : 'bg-zinc-50 border-zinc-200 text-zinc-500'
-            }`}
-          >
-            <SlidersHorizontal size={12} />
-            Filtros
-            {(groupFilter !== 'all' || statusFilter !== 'all') && (
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-            )}
-          </button>
-          <button
             onClick={() => setEditingProduct(null)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shrink-0"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
+            aria-label="Novo produto"
           >
             <PlusCircle size={14} />
             <span className="hidden sm:inline">Novo</span>
           </button>
-          <button
-            onClick={loadProducts}
-            className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors shrink-0"
-            title="Atualizar"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          </button>
         </div>
-
-        {/* Filters panel */}
-        {showFilters && (
-          <div className="border-t border-zinc-100 px-3 py-3 space-y-2.5 bg-zinc-50/50">
-            <div>
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Grupo/Marca</p>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  onClick={() => setGroupFilter('all')}
-                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
-                    groupFilter === 'all' ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200'
-                  }`}
-                >
-                  Todos
-                </button>
-                {groups.map(g => (
-                  <button
-                    key={g}
-                    onClick={() => setGroupFilter(g === groupFilter ? 'all' : g)}
-                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
-                      groupFilter === g ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200'
-                    }`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Status/Tipo</p>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { key: 'all', label: 'Todos' },
-                  { key: 'published', label: 'Publicados' },
-                  { key: 'draft', label: 'Rascunhos' },
-                  { key: 'with_rank', label: 'Com Rank', count: stats.withRank },
-                  { key: 'no_rank', label: 'Sem Rank' },
-                  { key: 'no_colors', label: 'Sem Cores', count: stats.noColors },
-                  { key: 'has_colors', label: 'Com Cores' },
-                  { key: 'multicolor', label: 'Multicor', count: stats.multicolor },
-                  { key: 'derived_colors', label: 'Auto-derivadas', count: stats.derivedColors },
-                  { key: 'saved_colors', label: 'Cores Salvas', count: stats.savedColors },
-                ].map(f => (
-                  <button
-                    key={f.key}
-                    onClick={() => setStatusFilter(f.key === statusFilter ? 'all' : f.key)}
-                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
-                      statusFilter === f.key ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-600 border-zinc-200'
-                    }`}
-                  >
-                    {f.label}
-                    {f.count !== undefined && <span className="ml-1 opacity-60">{f.count}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      <ActiveFilterChips
-        groupFilter={groupFilter}
-        statusFilter={statusFilter}
-        searchQuery={searchQuery}
-        onRemoveGroup={() => setGroupFilter('all')}
-        onRemoveStatus={() => setStatusFilter('all')}
-        onRemoveSearch={() => setSearchQuery('')}
-        onClearAll={() => { setGroupFilter('all'); setStatusFilter('all'); setSearchQuery(''); }}
-      />
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
+        <ModePill
+          active={viewMode === 'list'}
+          onClick={() => setViewMode('list')}
+          icon={<LayoutGrid size={13} />}
+          label="Lista"
+        />
+        <ModePill
+          active={false}
+          onClick={() => setViewMode('reorder')}
+          icon={<ListOrdered size={13} />}
+          label={hasActiveFilter ? `Ordenar (${filteredProducts.length})` : 'Ordenar'}
+          accent="amber"
+        />
+        <div className="flex-1" />
+        <ModePill
+          active={sortByRank}
+          onClick={() => setSortByRank(s => !s)}
+          icon={<ArrowUpDown size={13} />}
+          label={sortByRank ? 'Ordem: Rank' : 'Ordem: Padrao'}
+        />
+        <button
+          onClick={loadProducts}
+          className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg shrink-0"
+          aria-label="Atualizar"
+          title="Atualizar"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
 
-      {/* Select all */}
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-0.5">
+        <FilterPill active={groupFilter === 'all'} onClick={() => setGroupFilter('all')} icon={<LayoutGrid size={11} />} label="Todos" />
+        {groups.map(g => (
+          <FilterPill
+            key={g}
+            active={groupFilter === g}
+            onClick={() => setGroupFilter(g === groupFilter ? 'all' : g)}
+            icon={<Tag size={11} />}
+            label={g}
+          />
+        ))}
+      </div>
+
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-0.5">
+        <FilterPill active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} icon={<Filter size={11} />} label="Todos status" />
+        <FilterPill
+          active={statusFilter === 'published'}
+          onClick={() => setStatusFilter(statusFilter === 'published' ? 'all' : 'published')}
+          icon={<Eye size={11} />}
+          label="Publicados"
+          tone="emerald"
+        />
+        <FilterPill
+          active={statusFilter === 'draft'}
+          onClick={() => setStatusFilter(statusFilter === 'draft' ? 'all' : 'draft')}
+          icon={<EyeOff size={11} />}
+          label="Rascunhos"
+          tone="amber"
+        />
+        <FilterPill
+          active={statusFilter === 'with_rank'}
+          onClick={() => setStatusFilter(statusFilter === 'with_rank' ? 'all' : 'with_rank')}
+          icon={<TrendingUp size={11} />}
+          label={`Com rank (${stats.withRank})`}
+          tone="amber"
+        />
+        {stats.outOfStock > 0 && (
+          <FilterPill
+            active={statusFilter === 'out_of_stock'}
+            onClick={() => setStatusFilter(statusFilter === 'out_of_stock' ? 'all' : 'out_of_stock')}
+            icon={<AlertTriangle size={11} />}
+            label={`Sem estoque (${stats.outOfStock})`}
+            tone="red"
+          />
+        )}
+        <button
+          onClick={() => setShowMoreFilters(s => !s)}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 shrink-0"
+        >
+          <Filter size={11} />
+          Mais
+          {showMoreFilters ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+        </button>
+      </div>
+
+      {showMoreFilters && (
+        <div className="bg-white rounded-xl border border-zinc-200 px-2.5 py-2">
+          <div className="flex gap-1.5 flex-wrap">
+            {[
+              { key: 'no_colors',      label: `Sem cores (${stats.noColors})` },
+              { key: 'has_colors',     label: 'Com cores' },
+              { key: 'multicolor',     label: 'Multicor' },
+              { key: 'derived_colors', label: 'Auto-derivadas' },
+              { key: 'saved_colors',   label: 'Cores salvas' },
+              { key: 'no_rank',        label: 'Sem rank' },
+            ].map(f => (
+              <FilterPill
+                key={f.key}
+                active={statusFilter === f.key}
+                onClick={() => setStatusFilter(statusFilter === f.key ? 'all' : f.key)}
+                label={f.label}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {!loading && filteredProducts.length > 0 && (
-        <div className="flex items-center gap-2 px-1">
-          <button onClick={selectAll} className="flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-700 font-medium touch-manipulation py-1 min-w-0 truncate">
-            {selectedIds.size === filteredProducts.length && filteredProducts.length > 0 ? (
-              <CheckSquare size={16} className="text-blue-600 shrink-0" />
-            ) : selectedIds.size > 0 ? (
-              <MinusSquare size={16} className="text-blue-400 shrink-0" />
-            ) : (
-              <Square size={16} className="text-zinc-300 shrink-0" />
-            )}
-            <span className="truncate">
-              {selectedIds.size === filteredProducts.length ? 'Desmarcar todos' : `Selecionar todos (${filteredProducts.length})`}
-            </span>
-          </button>
+        <div className="flex items-center gap-2 px-1 min-w-0">
+          {!selectionMode ? (
+            <button
+              onClick={() => setSelectionMode(true)}
+              className="flex items-center gap-1.5 text-[11px] text-zinc-600 hover:text-zinc-900 font-medium px-2 py-1.5 rounded-lg hover:bg-zinc-100 touch-manipulation"
+            >
+              <CheckSquare size={13} />
+              Selecionar
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={selectAll}
+                className="flex items-center gap-1 text-[11px] text-zinc-700 font-semibold px-2 py-1.5 rounded-lg hover:bg-zinc-100 touch-manipulation min-w-0"
+              >
+                {selectedIds.size === filteredProducts.length ? (
+                  <CheckSquare size={14} className="text-blue-600 shrink-0" />
+                ) : (
+                  <Square size={14} className="text-zinc-300 shrink-0" />
+                )}
+                <span className="truncate">
+                  {selectedIds.size === 0
+                    ? 'Selecionar todos'
+                    : selectedIds.size === filteredProducts.length
+                      ? 'Desmarcar todos'
+                      : `${selectedIds.size} marcado(s)`
+                  }
+                </span>
+              </button>
+              <button
+                onClick={() => { setSelectionMode(false); setSelectedIds(new Set()); }}
+                className="text-[11px] text-zinc-400 hover:text-red-500 px-2 py-1.5 rounded-lg shrink-0"
+              >
+                Sair
+              </button>
+            </>
+          )}
           <span className="flex-1" />
           <span className="text-[11px] text-zinc-400 shrink-0">
             {filteredProducts.length} produto{filteredProducts.length !== 1 ? 's' : ''}
@@ -2502,18 +2690,20 @@ export default function AdminProducts() {
         </div>
       )}
 
-      {/* ============ PRODUCT LIST ============ */}
       {loading ? (
-        <div className="text-center py-20">
+        <div className="text-center py-16">
           <Loader2 size={28} className="animate-spin text-zinc-300 mx-auto" />
           <p className="text-zinc-400 mt-3 text-sm">Carregando produtos...</p>
         </div>
       ) : filteredProducts.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-zinc-100 text-center">
-          <Package size={36} className="text-zinc-200 mx-auto mb-3" />
+        <div className="bg-white p-10 rounded-2xl border border-zinc-100 text-center">
+          <Package size={32} className="text-zinc-200 mx-auto mb-2" />
           <p className="text-zinc-500 text-sm font-medium">Nenhum produto encontrado</p>
-          {(searchQuery || groupFilter !== 'all' || statusFilter !== 'all') && (
-            <button onClick={() => { setSearchQuery(''); setGroupFilter('all'); setStatusFilter('all'); }} className="text-blue-600 text-xs mt-2 hover:underline">
+          {hasActiveFilter && (
+            <button
+              onClick={() => { setSearchQuery(''); setGroupFilter('all'); setStatusFilter('all'); }}
+              className="text-blue-600 text-xs mt-2 hover:underline"
+            >
               Limpar filtros
             </button>
           )}
@@ -2526,61 +2716,44 @@ export default function AdminProducts() {
               product={p}
               isSelected={selectedIds.has(p.id)}
               onToggleSelect={() => toggleSelect(p.id)}
-              onSaveColors={handleSaveColors}
-              onStatusChange={handleStatusChange}
-              onEdit={(product) => setEditingProduct(product)}
-              onQuickRank={(pid) => setQuickRankProductId(pid)}
-              saving={savingId === p.id}
+              onOpenActions={(prod) => setActionSheetProduct(prod)}
+              onEdit={(prod) => setEditingProduct(prod)}
+              selectionMode={selectionMode}
             />
           ))}
         </div>
       )}
 
-      {/* ============ FLOATING BULK BAR ============ */}
       {hasSelection && (
-        <div className="fixed bottom-0 inset-x-0 z-50 animate-slide-up-bar" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-          <div className="bg-zinc-900 mx-2 sm:mx-3 rounded-2xl shadow-2xl px-3 py-2.5 max-w-full">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0">
-                  {selectedIds.size}
-                </span>
-                <span className="text-white/80 text-xs font-medium truncate">
-                  selecionado{selectedIds.size > 1 ? 's' : ''}
-                </span>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={selectAll} className="text-white/50 text-[10px] hover:text-white/80 px-2 py-1">
-                  {selectedIds.size === filteredProducts.length ? 'Desmarcar' : 'Todos'}
-                </button>
-                <button onClick={() => setSelectedIds(new Set())} className="p-1.5 text-white/40 hover:text-white/80 hover:bg-white/10 rounded-lg">
-                  <X size={14} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1 scrollbar-hide">
-              <button onClick={() => setShowBulkStatus(true)} className="flex items-center gap-1 px-3 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shrink-0">
-                <Globe size={12} /> Status
-              </button>
-              <button onClick={() => setShowBulkRank(true)} className="flex items-center gap-1 px-3 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition-colors shrink-0">
-                <TrendingUp size={12} /> Rank
-              </button>
-              <button onClick={() => setShowBulkColors(true)} className="flex items-center gap-1 px-3 py-2.5 bg-purple-600 text-white rounded-xl text-xs font-bold hover:bg-purple-700 transition-colors shrink-0">
-                <Palette size={12} /> Cores
-              </button>
-              <button onClick={() => setQuickBulkAction('add')} className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shrink-0">
-                <Plus size={12} /> Add Cor
-              </button>
-              <button onClick={() => setQuickBulkAction('remove')} className="flex items-center gap-1 px-3 py-2.5 bg-red-600/90 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition-colors shrink-0">
-                <Minus size={12} /> Rem Cor
-              </button>
-            </div>
-          </div>
+        <div
+          className="fixed bottom-0 inset-x-0 z-40 px-3 pb-3"
+          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+        >
+          <button
+            onClick={() => setShowBulkSheet(true)}
+            className="w-full max-w-md mx-auto bg-zinc-900 text-white py-3.5 rounded-2xl text-sm font-bold shadow-2xl flex items-center justify-center gap-2 hover:bg-zinc-800 transition-colors"
+          >
+            <span className="bg-blue-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
+              {selectedIds.size}
+            </span>
+            <span>Acoes em massa</span>
+            <ChevronUp size={14} />
+          </button>
         </div>
       )}
 
-      {/* ============ MODALS ============ */}
+      {showBulkSheet && hasSelection && (
+        <BulkActionSheet
+          count={selectedIds.size}
+          onClose={() => setShowBulkSheet(false)}
+          onOpenStatus={() => setShowBulkStatus(true)}
+          onOpenColors={() => setShowBulkColors(true)}
+          onOpenAddColor={() => setQuickBulkAction('add')}
+          onOpenRemoveColor={() => setQuickBulkAction('remove')}
+          onOpenRank={() => setShowBulkRank(true)}
+        />
+      )}
+
       {showBulkStatus && selectedProducts.length > 0 && (
         <BulkStatusModal
           products={selectedProducts}
@@ -2612,20 +2785,34 @@ export default function AdminProducts() {
       {showBulkRank && selectedProducts.length > 0 && (
         <BulkRankModal
           products={selectedProducts}
-          onApply={handleBulkRankApply as any}
+          onApply={handleBulkRankApply}
           onClose={() => setShowBulkRank(false)}
           saving={bulkSaving}
         />
       )}
 
-      {quickRankProduct && (
-        <QuickRankPopup
-          product={quickRankProduct}
-          onApply={handleQuickRankApply}
-          onClose={() => setQuickRankProductId(null)}
-          saving={savingId === quickRankProduct.id}
+      {actionSheetProduct && (
+        <ProductActionSheet
+          product={actionSheetProduct}
+          onClose={() => setActionSheetProduct(null)}
+          onEdit={(p) => setEditingProduct(p)}
+          onStatusChange={handleStatusChange}
+          onQuickRank={(pid) => setQuickRankProductId(pid)}
+          saving={savingId === actionSheetProduct.id}
         />
       )}
+
+      {quickRankProductId && (() => {
+        const p = products.find(pp => pp.id === quickRankProductId);
+        return p ? (
+          <QuickRankPopup
+            product={p}
+            onApply={handleQuickRankApply}
+            onClose={() => setQuickRankProductId(null)}
+            saving={savingId === p.id}
+          />
+        ) : null;
+      })()}
 
       {editingProduct !== undefined && (
         <ProductEditor
@@ -2641,5 +2828,87 @@ export default function AdminProducts() {
         <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// SMALL UI HELPERS (pills e tiles usados no main)
+// ============================================================================
+
+function StatTile({ label, value, tone }: { label: string; value: number; tone: 'zinc' | 'emerald' | 'amber' | 'blue' }) {
+  const tones: Record<string, string> = {
+    zinc:    'border-zinc-100 text-zinc-800',
+    emerald: 'border-emerald-100 text-emerald-700',
+    amber:   'border-amber-100 text-amber-700',
+    blue:    'border-blue-100 text-blue-700',
+  };
+  const labelTones: Record<string, string> = {
+    zinc:    'text-zinc-400',
+    emerald: 'text-emerald-500',
+    amber:   'text-amber-500',
+    blue:    'text-blue-500',
+  };
+  return (
+    <div className={`bg-white rounded-xl border ${tones[tone]} px-2 py-1.5 text-center min-w-0`}>
+      <p className={`text-[9px] font-bold ${labelTones[tone]} uppercase tracking-wider truncate`}>{label}</p>
+      <p className="text-base font-bold truncate">{value}</p>
+    </div>
+  );
+}
+
+function ModePill({
+  active, onClick, icon, label, accent,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  accent?: 'amber';
+}) {
+  const base = 'flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all shrink-0 whitespace-nowrap';
+  const activeStyle = accent === 'amber'
+    ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+    : 'bg-zinc-900 text-white border-zinc-900 shadow-sm';
+  const inactive = accent === 'amber'
+    ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+    : 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300';
+  return (
+    <button onClick={onClick} className={`${base} ${active ? activeStyle : inactive}`}>
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function FilterPill({
+  active, onClick, icon, label, tone,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  label: string;
+  tone?: 'emerald' | 'amber' | 'red' | 'blue';
+}) {
+  const base = 'flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all shrink-0 whitespace-nowrap';
+  const activeColors: Record<string, string> = {
+    emerald: 'bg-emerald-600 text-white border-emerald-600',
+    amber:   'bg-amber-600 text-white border-amber-600',
+    red:     'bg-red-600 text-white border-red-600',
+    blue:    'bg-blue-600 text-white border-blue-600',
+    default: 'bg-zinc-900 text-white border-zinc-900',
+  };
+  const inactiveColors: Record<string, string> = {
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+    amber:   'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
+    red:     'bg-red-50 text-red-700 border-red-200 hover:bg-red-100',
+    blue:    'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+    default: 'bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300',
+  };
+  const key = tone || 'default';
+  return (
+    <button onClick={onClick} className={`${base} ${active ? activeColors[key] : inactiveColors[key]}`}>
+      {icon}
+      {label}
+    </button>
   );
 }
