@@ -1,0 +1,34 @@
+# Backend Python (deploy em outro serviço como Railway/Render)
+backend/
+whatsapp-service/
+tests/
+test_reports/
+memory/
+.emergent/
+
+# Arquivos de teste
+backend_test.py
+test_flows.py
+test_wa.py
+test_result.md
+
+# Assets pesados não usados no frontend final
+insole_raw.png
+
+# Git/CI
+.git/
+.github/
+
+# Docs
+design_guidelines.json
+
+# Node/Python cache
+node_modules/
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
