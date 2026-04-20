@@ -30,8 +30,7 @@ next-env.d.ts
 dist/
 dist
 
-# Environment files (comprehensive coverage)
-
+# Credentials (keep out of repo)
 *token.json*
 *credentials.json*
 
@@ -79,34 +78,17 @@ agenthub/agents/youtube/db
 memory/test_credentials.md
 
 # Mobile development
-android-sdk/-e 
+android-sdk/
+
 # Environment and credential files
 .env
 .env.*
 *.env
 credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
 *.key
 .credentials
 
-# Permitir arquivos de exemplo (não contêm secrets)
+# Permitir arquivos de exemplo e o .env do frontend (nao contem secrets)
 !.env.example
 !**/.env.example
+!frontend/.env
