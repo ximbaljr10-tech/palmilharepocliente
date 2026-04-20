@@ -1,13 +1,13 @@
 // ============================================================================
 // RankStudio - Gerenciar ranking/ordem de produtos de forma simples
-// Mostra 3 caminhos: por grupo, por jarda, ou geral.
-// Dentro de cada, entra em modo Reorder.
+// Mostra caminhos: por grupo, por jarda, ou destaques da Home.
+// Dentro de cada, entra em modo Reorder (drag & drop real).
 // ============================================================================
 
 import React, { useMemo, useState } from 'react';
 import {
   ArrowLeft, TrendingUp, ChevronRight, ListOrdered,
-  Ruler, Tag, LayoutGrid, Search, Package,
+  Ruler, Tag, LayoutGrid, Search, Flame, Medal,
 } from 'lucide-react';
 import type { ParsedProduct } from '../types';
 
@@ -22,6 +22,13 @@ export interface RankStudioProps {
 export function RankStudio({ products, onBack, onOpenReorder }: RankStudioProps) {
   const [scope, setScope] = useState<RankScope>('group');
   const [search, setSearch] = useState('');
+
+  // Produtos publicados para fluxo de destaque (Home).
+  // Para "Em Alta / Top 3" pegamos apenas publicados — faz sentido na loja.
+  const publishedProducts = useMemo(
+    () => products.filter(p => p.status === 'published'),
+    [products]
+  );
 
   // Groups
   const groups = useMemo(() => {
@@ -57,6 +64,7 @@ export function RankStudio({ products, onBack, onOpenReorder }: RankStudioProps)
   }, [products]);
 
   const withRankCount = products.filter(p => p._rank !== null).length;
+  const publishedWithRank = publishedProducts.filter(p => p._rank !== null).length;
 
   return (
     <div className="space-y-2.5 pb-8 overflow-x-hidden">
@@ -82,10 +90,30 @@ export function RankStudio({ products, onBack, onOpenReorder }: RankStudioProps)
           <ListOrdered size={13} /> Como funciona
         </p>
         <p className="text-[11px] leading-relaxed">
-          Escolha uma <strong>categoria</strong> e arraste os produtos na ordem que voce quer que apareçam na loja.
-          O produto no topo = posicao #1.
+          Arraste o item pela alça <strong>⋮⋮</strong> (ou use as setas) para reordenar.
+          O produto no <strong>topo = posição #1</strong>. Na Home da loja, os 3 primeiros
+          viram <strong>TOP 1-3</strong> e os 3 seguintes viram a faixa <strong>"Em Alta"</strong>.
         </p>
       </div>
+
+      {/* DESTAQUE: Home (Top 3 + Em Alta) — atalho principal */}
+      <button
+        onClick={() => onOpenReorder(publishedProducts, 'Destaque da Home (Top 3 + Em Alta)')}
+        className="w-full bg-gradient-to-br from-red-600 to-amber-600 text-white rounded-2xl p-3 flex items-center gap-3 shadow-sm hover:shadow-md active:scale-[0.99] transition-all"
+      >
+        <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+          <Flame size={18} />
+        </div>
+        <div className="min-w-0 flex-1 text-left">
+          <p className="text-sm font-bold flex items-center gap-1.5">
+            <Medal size={13} /> Destaque da Home
+          </p>
+          <p className="text-[11px] text-white/90 truncate">
+            Defina TOP 1–3 + Em Alta • {publishedProducts.length} publicados, {publishedWithRank} com rank
+          </p>
+        </div>
+        <ChevronRight size={18} className="shrink-0 text-white/80" />
+      </button>
 
       {/* Atalho: reordenar tudo */}
       <button
@@ -98,7 +126,7 @@ export function RankStudio({ products, onBack, onOpenReorder }: RankStudioProps)
         <div className="min-w-0 flex-1 text-left">
           <p className="text-sm font-bold">Reordenar TUDO</p>
           <p className="text-[11px] text-white/70 truncate">
-            Arrasta todos os {products.length} produtos juntos
+            Todos os {products.length} produtos juntos (inclui rascunhos)
           </p>
         </div>
         <ChevronRight size={18} className="shrink-0 text-white/70" />

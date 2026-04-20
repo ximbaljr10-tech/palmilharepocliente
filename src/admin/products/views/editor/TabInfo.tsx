@@ -1,12 +1,15 @@
 import React from 'react';
-import { DollarSign, Folder, FolderPlus } from 'lucide-react';
+import { DollarSign, Folder, FolderPlus, Info } from 'lucide-react';
 import { Field, INPUT_CLASS, StatusButton } from '../../components/Field';
+import { CurrencyInput, formatCents } from '../../components/CurrencyInput';
 
 export interface TabInfoProps {
   title: string; setTitle: (v: string) => void;
   handle: string; setHandle: (v: string) => void;
   description: string; setDescription: (v: string) => void;
-  price: string; setPrice: (v: string) => void;
+  /** Preço em CENTAVOS inteiros (ou null quando vazio) */
+  priceCents: number | null;
+  setPriceCents: (v: number | null) => void;
   status: string; setStatus: (v: string) => void;
   grupo: string; setGrupo: (v: string) => void;
   allGroups: string[];
@@ -18,7 +21,7 @@ export interface TabInfoProps {
 export function TabInfo(props: TabInfoProps) {
   const {
     title, setTitle, handle, setHandle, description, setDescription,
-    price, setPrice, status, setStatus,
+    priceCents, setPriceCents, status, setStatus,
     grupo, setGrupo, allGroups,
     showNewGroup, setShowNewGroup, newGroupName, setNewGroupName,
     autoHandle,
@@ -45,16 +48,21 @@ export function TabInfo(props: TabInfoProps) {
       </Field>
 
       <Field label="Preco" required icon={<DollarSign size={11} />}>
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-sm">R$</span>
-          <input
-            type="number" inputMode="decimal" step="0.01" min="0"
-            value={price}
-            onChange={e => setPrice(e.target.value)}
-            className={INPUT_CLASS + ' pl-10'}
-            placeholder="45.90"
-          />
-        </div>
+        <CurrencyInput
+          valueCents={priceCents}
+          onChange={setPriceCents}
+          className={INPUT_CLASS + ' font-bold text-zinc-900 text-base tracking-tight'}
+          placeholder="R$ 0,00"
+          aria-label="Preço em reais"
+        />
+        <p className="text-[10px] text-zinc-500 mt-1.5 flex items-start gap-1">
+          <Info size={10} className="shrink-0 mt-0.5 text-blue-500" />
+          <span>
+            Digite somente os números. Ex: <strong>4390</strong> vira{' '}
+            <strong>{formatCents(4390)}</strong>. A vírgula é inserida automaticamente — os dois
+            últimos dígitos sempre são os centavos.
+          </span>
+        </p>
       </Field>
 
       <Field label="Status">

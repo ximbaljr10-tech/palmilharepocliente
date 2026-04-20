@@ -11,6 +11,7 @@ import { SKIP_COLOR_YARDS } from '../../../../types';
 import type { ColorItem, EditorTab, ParsedProduct } from '../../types';
 import { StatusDot } from '../../components/StatusDot';
 import { RankPill } from '../../components/RankPill';
+import { centsToReais, reaisToCents } from '../../components/CurrencyInput';
 import { EditorTabs } from './EditorTabs';
 import { TabInfo } from './TabInfo';
 import { TabImages } from './TabImages';
@@ -52,7 +53,13 @@ export function ProductEditor({
   const [handle, setHandle] = useState(product?.handle || '');
   const [description, setDescription] = useState(product?.description || '');
   const [status, setStatus] = useState(product?.status || 'draft');
-  const [price, setPrice] = useState(product ? product._price.toFixed(2) : '');
+  // Preço agora é mantido internamente em CENTAVOS (inteiro).
+  // Evita qualquer ambiguidade entre "43,90" vs "4390". O componente
+  // CurrencyInput formata pra R$ em tempo real. Ao salvar, convertemos
+  // cents → reais (como a API espera).
+  const [priceCents, setPriceCents] = useState<number | null>(
+    product ? reaisToCents(product._price) : null
+  );
   const [shHeight, setShHeight] = useState(String(product?._shippingHeight || ''));
   const [shWidth, setShWidth] = useState(String(product?._shippingWidth || ''));
   const [shLength, setShLength] = useState(String(product?._shippingLength || ''));
@@ -87,10 +94,10 @@ export function ProductEditor({
   const tabErrors = useMemo((): Partial<Record<EditorTab, boolean>> => {
     const out: Partial<Record<EditorTab, boolean>> = {};
     if (!title.trim()) out.info = true;
-    if (!price || Number(price) <= 0) out.info = true;
+    if (priceCents === null || priceCents <= 0) out.info = true;
     if (rank.trim() !== '' && (isNaN(Number(rank)) || Number(rank) < 0)) out.rank = true;
     return out;
-  }, [title, price, rank]);
+  }, [title, priceCents, rank]);
 
   const autoHandle = (t: string) => {
     if (isNew || !product?.handle) {
@@ -106,7 +113,7 @@ export function ProductEditor({
   const handleSubmit = () => {
     const errs: string[] = [];
     if (!title.trim()) errs.push('Titulo obrigatorio');
-    if (!price || Number(price) <= 0) errs.push('Preco invalido');
+    if (priceCents === null || priceCents <= 0) errs.push('Preco invalido');
     let rankValue: number | null = null;
     if (rank.trim() !== '') {
       const n = Number(rank);
@@ -115,19 +122,23 @@ export function ProductEditor({
     }
     if (errs.length > 0) {
       setErrors(errs);
-      if (!title.trim() || !price || Number(price) <= 0) setTab('info');
+      if (!title.trim() || priceCents === null || priceCents <= 0) setTab('info');
       else if (rank.trim() !== '') setTab('rank');
       return;
     }
 
     const finalGroup = showNewGroup && newGroupName.trim() ? newGroupName.trim() : grupo;
 
+    // Converte centavos -> reais (forma canônica do backend) ANTES de salvar.
+    // Ex: priceCents=4390 → priceReais=43.90
+    const priceReais = centsToReais(priceCents);
+
     onSave({
       title: title.trim(),
       handle: handle.trim() || undefined,
       description: description.trim(),
       status,
-      price: Number(price),
+      price: priceReais,
       shipping_height: Number(shHeight) || null,
       shipping_width: Number(shWidth) || null,
       shipping_length: Number(shLength) || null,
@@ -205,7 +216,7 @@ export function ProductEditor({
               title={title} setTitle={setTitle}
               handle={handle} setHandle={setHandle}
               description={description} setDescription={setDescription}
-              price={price} setPrice={setPrice}
+              priceCents={priceCents} setPriceCents={setPriceCents}
               status={status} setStatus={setStatus}
               grupo={grupo} setGrupo={setGrupo}
               allGroups={allGroups}

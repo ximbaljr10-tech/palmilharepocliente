@@ -192,7 +192,25 @@ export default function StoreLanding() {
     })();
   }, []);
 
+  // "Mais Vendidos" agora é alimentado EXCLUSIVAMENTE pelo ranking manual
+  // definido no admin (metadata.rank) — o usuário arrasta no RankStudio para
+  // escolher TOP 1–3 e Em Alta.
+  //
+  // Fallback: se nenhum produto tiver rank definido, mantém o comportamento
+  // anterior (yards === 3000 como proxy de "mais vendido").
   const bestSellers = React.useMemo(() => {
+    const getRank = (p: Product): number | null => {
+      const r = p.metadata?.rank;
+      if (typeof r === 'number' && !isNaN(r)) return r;
+      if (typeof r === 'string' && r.trim() !== '' && !isNaN(Number(r))) return Number(r);
+      return null;
+    };
+    const ranked = allProducts
+      .filter(p => getRank(p) !== null)
+      .sort((a, b) => (getRank(a)! - getRank(b)!))
+      .slice(0, 12);
+    if (ranked.length >= 4) return ranked;
+    // Fallback legado: mesma lógica que havia antes do ranking manual.
     const pop = allProducts.filter(p => p.yards === 3000);
     return (pop.length >= 4 ? pop : allProducts).slice(0, 12);
   }, [allProducts]);
