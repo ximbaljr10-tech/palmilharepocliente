@@ -822,3 +822,218 @@ export async function updateOrderCustomerData(
     return { success: false, error: err.message };
   }
 }
+
+// ============================================================
+// LABELS v2 — Sistema desacoplado de etiquetas
+// ============================================================
+// Todos os helpers abaixo conversam SOMENTE com as rotas novas
+// /admin/remessas/labels/*. Nunca alteram pedidos.
+//
+// Feature flag: localStorage['labels_v2_enabled'] (default '1')
+//   - '1' → usa o fluxo novo (download local, sem redirect)
+//   - '0' → usa o fluxo antigo (window.open em /admin/superfrete)
+// ============================================================
+
+export function isLabelsV2Enabled(): boolean {
+  try {
+    const v = localStorage.getItem('labels_v2_enabled');
+    return v === null ? true : v === '1';
+  } catch {
+    return true;
+  }
+}
+
+export type LabelJobStatus = {
+  success: boolean;
+  status: 'pending' | 'building' | 'ready' | 'error';
+  progress_current: number;
+  progress_total: number;
+  ready: boolean;
+  error: string | null;
+  page_count?: number | null;
+  size_bytes?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  updated_at?: string | null;
+  message: string;
+};
+
+// Dispara a geração em background. Responde rápido (202).
+export async function buildRemessaLabels(remessaId: number): Promise<{
+  success: boolean;
+  accepted?: boolean;
+  already_running?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  return adminFetch('/admin/remessas/labels', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'build', remessa_id: remessaId }),
+  });
+}
+
+// Consulta o status/progresso do job.
+export async function getRemessaLabelsStatus(remessaId: number): Promise<LabelJobStatus> {
+  return adminFetch('/admin/remessas/labels', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'status', remessa_id: remessaId }),
+  });
+}
+
+// Marca o job como pendente (invalida cache). Usado ao add/remove pedido.
+export async function invalidateRemessaLabels(remessaId: number): Promise<{
+  success: boolean;
+  invalidated?: boolean;
+  message?: string;
+}> {
+  return adminFetch('/admin/remessas/labels', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'invalidate', remessa_id: remessaId }),
+  });
+}
+
+// Faz o download autenticado do PDF consolidado e dispara o download no browser.
+// Nunca abre nova aba, nunca redireciona para SuperFrete.
+export async function downloadRemessaLabelsPdf(
+  remessaId: number,
+  remessaCode: string,
+): Promise<{ success: boolean; error?: string }> {
+  const token = localStorage.getItem('admin_token');
+  if (!token) throw new Error('Nao autenticado');
+
+  const url = `${MEDUSA_URL}/admin/remessas/labels/download?remessa_id=${encodeURIComponent(remessaId)}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      ...getAuditHeaders(),
+    },
+  });
+
+  if (res.status === 401) {
+    localStorage.removeItem('admin_token');
+    throw new Error('Sessao expirada. Faca login novamente.');
+  }
+  if (!res.ok) {
+    let msg = `Erro HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      msg = data.error || data.message || msg;
+    } catch {
+      // ignore
+    }
+    return { success: false, error: msg };
+  }
+
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `etiquetas_${remessaCode || 'remessa'}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } finally {
+    // Libera memória depois que o download começou
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  }
+  return { success: true };
+}
+
+// Download da etiqueta individual de um pedido (preparação p/ WhatsApp).
+export async function downloadOrderLabelPdf(
+  displayId: number | string,
+  orderMedusaId?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const token = localStorage.getItem('admin_token');
+  if (!token) throw new Error('Nao autenticado');
+
+  const qs = orderMedusaId
+    ? `order_id=${encodeURIComponent(orderMedusaId)}`
+    : `display_id=${encodeURIComponent(String(displayId))}`;
+  const url = `${MEDUSA_URL}/admin/remessas/labels/individual?${qs}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      ...getAuditHeaders(),
+    },
+  });
+
+  if (res.status === 401) {
+    localStorage.removeItem('admin_token');
+    throw new Error('Sessao expirada. Faca login novamente.');
+  }
+  if (!res.ok) {
+    let msg = `Erro HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      msg = data.error || data.message || msg;
+    } catch {}
+    return { success: false, error: msg };
+  }
+
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `pedido_${displayId}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  }
+  return { success: true };
+}
+
+// Helper de alto nível: dispara build se precisar, faz polling até pronto, baixa.
+// Callbacks opcionais para UI mostrar progresso.
+export async function ensureAndDownloadRemessaLabels(
+  remessaId: number,
+  remessaCode: string,
+  onProgress?: (s: LabelJobStatus) => void,
+  opts: { maxWaitMs?: number; pollMs?: number } = {},
+): Promise<{ success: boolean; error?: string }> {
+  const maxWaitMs = opts.maxWaitMs ?? 120_000; // 2min default — mesmo com 20 pedidos dá tempo
+  const pollMs = opts.pollMs ?? 1500;
+
+  // 1) Status atual
+  let st = await getRemessaLabelsStatus(remessaId);
+  if (onProgress) onProgress(st);
+
+  // 2) Se não está pronto nem building, dispara build
+  if (st.status !== 'ready' && st.status !== 'building') {
+    const b = await buildRemessaLabels(remessaId);
+    if (!b.success && !b.accepted) {
+      return { success: false, error: b.error || b.message || 'Falha ao iniciar geração.' };
+    }
+    // Pequena espera antes do primeiro poll
+    await new Promise(r => setTimeout(r, 400));
+    st = await getRemessaLabelsStatus(remessaId);
+    if (onProgress) onProgress(st);
+  }
+
+  // 3) Polling
+  const startedAt = Date.now();
+  while (st.status === 'building' || st.status === 'pending') {
+    if (Date.now() - startedAt > maxWaitMs) {
+      return { success: false, error: `Tempo esgotado (${Math.round(maxWaitMs/1000)}s). Tente novamente em instantes — o servidor pode estar ocupado.` };
+    }
+    await new Promise(r => setTimeout(r, pollMs));
+    st = await getRemessaLabelsStatus(remessaId);
+    if (onProgress) onProgress(st);
+  }
+
+  if (st.status === 'error') {
+    return { success: false, error: st.error || 'Erro ao gerar etiquetas.' };
+  }
+  if (st.status !== 'ready') {
+    return { success: false, error: `Estado inesperado: ${st.status}` };
+  }
+
+  // 4) Download
+  return downloadRemessaLabelsPdf(remessaId, remessaCode);
+}

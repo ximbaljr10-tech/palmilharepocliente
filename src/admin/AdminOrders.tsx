@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { RefreshCw, Package, Clock, CreditCard, BoxIcon, Truck, CheckCircle2, XCircle, Loader2, ChevronRight, ChevronDown, ChevronUp, MessageCircle, MoreVertical, FileText, Trash2, Download, X, Share2, Tag, Wallet, Printer, Search, Filter, Zap, Square, CheckSquare, AlertTriangle, FileDown, RotateCcw, Plus, Eye, Minus } from 'lucide-react';
-import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel, batchFinalizeAndLabelSequential, fetchRemessas, createRemessa, addOrdersToRemessa, removeOrderFromRemessa, undoRemessa, closeRemessa, reopenRemessa, logRemessaPdfExport, logRemessaLabelExport, type Remessa, type OrderRemessaMap } from './adminApi';
+import { adminFetch, isOrderArchived, getStatusConfig, formatCurrency, batchSyncSuperfrete, batchRevertToPaid, batchFinalizeAndLabel, batchFinalizeAndLabelSequential, fetchRemessas, createRemessa, addOrdersToRemessa, removeOrderFromRemessa, undoRemessa, closeRemessa, reopenRemessa, logRemessaPdfExport, logRemessaLabelExport, type Remessa, type OrderRemessaMap, isLabelsV2Enabled, ensureAndDownloadRemessaLabels, getRemessaLabelsStatus, buildRemessaLabels, invalidateRemessaLabels, type LabelJobStatus } from './adminApi';
 import RemessaManagementOverlay from './RemessaOverlay';
 import { LINE_COLORS } from '../types';
 import jsPDF from 'jspdf';
@@ -90,6 +90,15 @@ export default function AdminOrders() {
   // Label printing state
   const [showLabelOverlay, setShowLabelOverlay] = useState(false);
   const [printingLabels, setPrintingLabels] = useState(false);
+  // Progresso legível para humanos (labels v2). Só aparece se fluxo novo está ativo.
+  const [labelsJobStatus, setLabelsJobStatus] = useState<null | {
+    remessa_id: number;
+    remessa_code: string;
+    status: LabelJobStatus['status'];
+    current: number;
+    total: number;
+    message: string;
+  }>(null);
 
   // ============ REMESSA STATE (only active when filter === 'preparing') ============
   const [remessas, setRemessas] = useState<Remessa[]>([]);
@@ -917,6 +926,10 @@ export default function AdminOrders() {
         });
         setSelectedOrders(new Set());
         await loadRemessas();
+        // Invalida cache de etiquetas v2 (se remessa teve pedido adicionado, PDF antigo fica obsoleto)
+        if (isLabelsV2Enabled() && (result.added || 0) > 0) {
+          invalidateRemessaLabels(remessaId).catch(() => {});
+        }
       } else {
         setRemessaMessage({ type: 'error', text: result.error || 'Erro ao adicionar pedidos.' });
       }
@@ -938,6 +951,10 @@ export default function AdminOrders() {
       if (result.success) {
         setRemessaMessage({ type: 'success', text: `Pedido #${displayId || '?'} removido da remessa ${mapping.remessa_code}.` });
         await loadRemessas();
+        // Invalida cache de etiquetas v2
+        if (isLabelsV2Enabled()) {
+          invalidateRemessaLabels(mapping.remessa_id).catch(() => {});
+        }
       } else {
         setRemessaMessage({ type: 'error', text: result.error || 'Erro ao remover pedido.' });
       }
@@ -1021,6 +1038,30 @@ export default function AdminOrders() {
       alert('Nenhum pedido com etiqueta nesta remessa.');
       return;
     }
+    if (isLabelsV2Enabled()) {
+      setPrintingLabels(true);
+      setLabelsJobStatus({ remessa_id: remessaId, remessa_code: rem.code, status: 'pending', current: 0, total: ordersForLabels.length, message: 'Preparando...' });
+      try {
+        const res = await ensureAndDownloadRemessaLabels(remessaId, rem.code, (st) => {
+          setLabelsJobStatus({ remessa_id: remessaId, remessa_code: rem.code, status: st.status, current: st.progress_current || 0, total: st.progress_total || ordersForLabels.length, message: st.message });
+        });
+        if (!res.success) {
+          alert(res.error || 'Erro ao gerar etiquetas.');
+        } else {
+          setRemessaMessage({ type: 'success', text: `Etiquetas da ${rem.code} baixadas com sucesso.` });
+          logRemessaLabelExport(remessaId).catch(() => {});
+          setTimeout(() => setRemessaMessage(null), 5000);
+        }
+      } catch (err: any) {
+        alert(err.message || 'Erro ao imprimir etiquetas.');
+      } finally {
+        setPrintingLabels(false);
+        setTimeout(() => setLabelsJobStatus(null), 3500);
+      }
+      return;
+    }
+
+    // Fluxo antigo (fallback via flag)
     setPrintingLabels(true);
     try {
       const sfIds = ordersForLabels.map(o => o.superfrete_id).filter(Boolean);
@@ -1066,6 +1107,43 @@ export default function AdminOrders() {
           </div>
         </div>
       )}
+
+      {/* ============ LABELS v2: progresso da geracao (banner legivel p/ humanos) ============ */}
+      {labelsJobStatus && (
+        <div className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm border ${
+          labelsJobStatus.status === 'ready' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+          labelsJobStatus.status === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}>
+          {labelsJobStatus.status === 'ready' ? (
+            <CheckCircle2 size={16} className="shrink-0" />
+          ) : labelsJobStatus.status === 'error' ? (
+            <XCircle size={16} className="shrink-0" />
+          ) : (
+            <Loader2 size={16} className="animate-spin shrink-0" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-xs">
+              Etiquetas da {labelsJobStatus.remessa_code}
+              {labelsJobStatus.total > 0 && labelsJobStatus.status === 'building' && (
+                <span className="ml-2 text-[10px] opacity-70">
+                  {labelsJobStatus.current}/{labelsJobStatus.total}
+                </span>
+              )}
+            </p>
+            <p className="text-[10px] opacity-80 truncate">{labelsJobStatus.message}</p>
+            {labelsJobStatus.status === 'building' && labelsJobStatus.total > 0 && (
+              <div className="mt-1.5 w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-blue-500 h-full transition-all duration-300"
+                  style={{ width: `${Math.min(100, (labelsJobStatus.current / labelsJobStatus.total) * 100)}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
 
       {/* ============ TOP BAR: Refresh + 3-dot menu ============ */}
       <div className="flex justify-end items-center gap-2">

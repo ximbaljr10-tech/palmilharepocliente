@@ -7,7 +7,7 @@ import {
   StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History,
   ChevronDown, ChevronUp
 } from 'lucide-react';
-import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards } from './adminApi';
+import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards, isLabelsV2Enabled, downloadOrderLabelPdf } from './adminApi';
 import TrackingCodeDisplay from '../components/TrackingCodeDisplay';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -455,8 +455,22 @@ export default function AdminOrderDetail() {
 
   const printLabel = async () => {
     if (!order?.superfrete_id) return;
+    // --- FLUXO NOVO (v2): download local, zero redirect para SuperFrete ---
+    if (isLabelsV2Enabled()) {
+      try {
+        const r = await downloadOrderLabelPdf(order.id, order.medusa_order_id);
+        if (!r.success) {
+          alert(r.error || 'Erro ao baixar etiqueta.');
+        }
+        return;
+      } catch (err: any) {
+        // Se a rota nova falhar por qualquer motivo, segue no fluxo antigo (fail-safe)
+        console.warn('[labels v2] falhou, usando fluxo antigo:', err.message);
+      }
+    }
+
+    // --- FLUXO ANTIGO (fallback): window.open. Mantido para emergência. ---
     try {
-      // Send order_info for PDF header identification
       const orderInfo = [{
         superfrete_id: order.superfrete_id,
         order_id: order.id,
@@ -470,7 +484,6 @@ export default function AdminOrderDetail() {
       });
 
       if (result.success && result.data?.pdf_base64) {
-        // Modified PDF returned as base64 — open as blob
         const byteCharacters = atob(result.data.pdf_base64);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
