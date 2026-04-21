@@ -140,7 +140,17 @@ export default function YardCatalog() {
       try {
         const res = await api.getProducts(300, 0);
         const all = res.products.filter((p: Product) => !p.title.startsWith('Medusa '));
-        setProducts(all.filter((p: Product) => p.yards === yardNumber));
+        // Sort by admin rank within this yard category
+        const filtered = all.filter((p: Product) => p.yards === yardNumber);
+        const getRank = (p: Product): number | null => {
+          const r = p.metadata?.rank;
+          if (typeof r === 'number' && !isNaN(r)) return r;
+          if (typeof r === 'string' && r.trim() !== '' && !isNaN(Number(r))) return Number(r);
+          return null;
+        };
+        const ranked = filtered.filter(p => getRank(p) !== null).sort((a, b) => getRank(a)! - getRank(b)!);
+        const unranked = filtered.filter(p => getRank(p) === null);
+        setProducts([...ranked, ...unranked]);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();

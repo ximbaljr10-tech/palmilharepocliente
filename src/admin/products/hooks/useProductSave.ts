@@ -91,10 +91,18 @@ export function useProductSave({ showToast, reload }: SaveDeps) {
           metadata: metadataUpdate,
         };
 
-        if (data.price && editing && data.price !== editing._price) {
-          updatePayload.price = data.price;
-          if (editing._variantId) updatePayload.variant_id = editing._variantId;
-          if (editing._priceId) updatePayload.price_id = editing._priceId;
+        // Preço: só enviamos se mudou, e comparamos SEMPRE em centavos inteiros
+        // para evitar falsos "igual" por problema de ponto flutuante (43.9 vs
+        // 43.90000001). O backend faz Math.round(price * 100) para gravar em
+        // centavos, então aqui comparamos pelo mesmo critério.
+        if (data.price !== undefined && data.price !== null && editing) {
+          const newCents = Math.round(Number(data.price) * 100);
+          const oldCents = Math.round(Number(editing._price || 0) * 100);
+          if (newCents > 0 && newCents !== oldCents) {
+            updatePayload.price = data.price;
+            if (editing._variantId) updatePayload.variant_id = editing._variantId;
+            if (editing._priceId) updatePayload.price_id = editing._priceId;
+          }
         }
 
         const currentUrls = (editing?.images || []).map(i => i.url);
@@ -111,7 +119,17 @@ export function useProductSave({ showToast, reload }: SaveDeps) {
           throw new Error(result.errors?.join(', ') || 'Erro ao salvar');
         }
 
-        showToast('Produto atualizado!', 'success');
+        // Toast informativo: se o preço mudou, mostramos o novo valor formatado
+        // em BRL para dar confirmação visual explícita ao operador (antes o
+        // input voltava visualmente ao valor antigo e gerava confusão).
+        if (updatePayload.price !== undefined) {
+          const fmt = new Intl.NumberFormat('pt-BR', {
+            style: 'currency', currency: 'BRL',
+          });
+          showToast(`Produto atualizado! Novo preço: ${fmt.format(Number(updatePayload.price))}`, 'success');
+        } else {
+          showToast('Produto atualizado!', 'success');
+        }
         await reload();
         return true;
       } catch (err: any) {

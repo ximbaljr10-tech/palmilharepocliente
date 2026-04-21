@@ -513,7 +513,7 @@ export default function Checkout() {
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
                 <div className="sm:col-span-8">
                   <label htmlFor="street" className="block text-sm font-medium text-zinc-700 mb-1">Rua / Avenida</label>
-                  <input type="text" id="street" required readOnly value={formData.street} className="w-full px-4 py-3 rounded-xl border border-zinc-200 outline-none transition-all bg-zinc-100 text-zinc-600 cursor-not-allowed" />
+                  <input type="text" id="street" required value={formData.street} onChange={(e) => setFormData({ ...formData, street: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
                 </div>
                 <div className="sm:col-span-4">
                   <label htmlFor="number" className="block text-sm font-medium text-zinc-700 mb-1">Numero da residencia</label>
@@ -572,7 +572,7 @@ export default function Checkout() {
                 </div>
                 <div className="sm:col-span-6">
                   <label htmlFor="neighborhood" className="block text-sm font-medium text-zinc-700 mb-1">Bairro</label>
-                  <input type="text" id="neighborhood" required readOnly value={formData.neighborhood} className="w-full px-4 py-3 rounded-xl border border-zinc-200 outline-none transition-all bg-zinc-100 text-zinc-600 cursor-not-allowed" />
+                  <input type="text" id="neighborhood" required value={formData.neighborhood} onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">

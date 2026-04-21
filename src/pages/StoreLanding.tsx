@@ -16,6 +16,19 @@ import { Loader2, BookOpen, ArrowRight, Flame, Medal, TrendingUp, ChevronRight }
 
 const LOGO_URL = "https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0";
 
+/** Sort products by admin-defined rank. Ranked items first (ascending), then unranked. */
+function sortByRank(products: Product[]): Product[] {
+  const getRank = (p: Product): number | null => {
+    const r = p.metadata?.rank;
+    if (typeof r === 'number' && !isNaN(r)) return r;
+    if (typeof r === 'string' && r.trim() !== '' && !isNaN(Number(r))) return Number(r);
+    return null;
+  };
+  const ranked = products.filter(p => getRank(p) !== null).sort((a, b) => getRank(a)! - getRank(b)!);
+  const unranked = products.filter(p => getRank(p) === null);
+  return [...ranked, ...unranked];
+}
+
 /* ─── ProductCard ─ */
 interface ProductCardProps { product: Product; rank?: number; isTrending?: boolean; }
 
@@ -185,19 +198,34 @@ export default function StoreLanding() {
     (async () => {
       try {
         const res = await api.getProducts(300, 0);
-        const all = res.products.filter((p: Product) => !p.title.startsWith('Medusa '));
+        let all = res.products.filter((p: Product) => !p.title.startsWith('Medusa '));
+        // Sort by admin-defined rank: ranked products first, then unranked
+        all = sortByRank(all);
         setAllProducts(all); setProducts(all);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();
   }, []);
 
-  // "Mais Vendidos" agora é alimentado EXCLUSIVAMENTE pelo ranking manual
-  // definido no admin (metadata.rank) — o usuário arrasta no RankStudio para
-  // escolher TOP 1–3 e Em Alta.
+  // ============================================================================
+  // "Mais Vendidos" — alimentado pelo RANKING MANUAL do admin (metadata.rank)
+  // ----------------------------------------------------------------------------
+  // Regras:
+  //   • TOP 1–3:  produtos com menor `rank` (1, 2, 3).
+  //   • Em Alta:  rank 4, 5, 6.
+  //   • Restantes (até 12 no total) preenchem a grid.
   //
-  // Fallback: se nenhum produto tiver rank definido, mantém o comportamento
-  // anterior (yards === 3000 como proxy de "mais vendido").
+  // Estratégia de fallback (graciosa):
+  //   • Se há PELO MENOS 1 produto com rank → usamos os ranqueados PRIMEIRO,
+  //     e completamos o que faltar (até 12) com produtos sem rank, priorizando
+  //     os mais vendidos legados (yards === 3000, carro-chefe histórico).
+  //   • Se NENHUM tem rank → cai no comportamento antigo: yards=3000 como
+  //     proxy de "mais vendido"; se ainda não tiver 4, lista qualquer coisa.
+  //
+  // Isso resolve o problema em que o admin definia apenas 3 TOPs e a seção
+  // sumia porque `ranked.length < 4` — agora aparece sempre que houver pelo
+  // menos 1 rank definido, mantendo a seção estável.
+  // ============================================================================
   const bestSellers = React.useMemo(() => {
     const getRank = (p: Product): number | null => {
       const r = p.metadata?.rank;
@@ -205,12 +233,21 @@ export default function StoreLanding() {
       if (typeof r === 'string' && r.trim() !== '' && !isNaN(Number(r))) return Number(r);
       return null;
     };
+
     const ranked = allProducts
       .filter(p => getRank(p) !== null)
-      .sort((a, b) => (getRank(a)! - getRank(b)!))
-      .slice(0, 12);
-    if (ranked.length >= 4) return ranked;
-    // Fallback legado: mesma lógica que havia antes do ranking manual.
+      .sort((a, b) => (getRank(a)! - getRank(b)!));
+
+    // Há ranking manual? Usa ele e complementa com fallback suave.
+    if (ranked.length > 0) {
+      const rankedIds = new Set(ranked.map(p => p.id));
+      const popFill = allProducts.filter(p => !rankedIds.has(p.id) && p.yards === 3000);
+      const anyFill = allProducts.filter(p => !rankedIds.has(p.id) && p.yards !== 3000);
+      const filler = [...popFill, ...anyFill];
+      return [...ranked, ...filler].slice(0, 12);
+    }
+
+    // Sem ranking manual — comportamento legado.
     const pop = allProducts.filter(p => p.yards === 3000);
     return (pop.length >= 4 ? pop : allProducts).slice(0, 12);
   }, [allProducts]);

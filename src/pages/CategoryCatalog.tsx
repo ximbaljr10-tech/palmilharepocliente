@@ -146,7 +146,17 @@ export default function CategoryCatalog() {
       try {
         const res = await api.getProducts(300, 0);
         const all = res.products.filter((p: Product) => !p.title.startsWith('Medusa '));
-        setProducts(all.filter(catDef.filter));
+        // Sort by admin rank, then show
+        const filtered = all.filter(catDef.filter);
+        const getRank = (p: Product): number | null => {
+          const r = p.metadata?.rank;
+          if (typeof r === 'number' && !isNaN(r)) return r;
+          if (typeof r === 'string' && r.trim() !== '' && !isNaN(Number(r))) return Number(r);
+          return null;
+        };
+        const ranked = filtered.filter(p => getRank(p) !== null).sort((a, b) => getRank(a)! - getRank(b)!);
+        const unranked = filtered.filter(p => getRank(p) === null);
+        setProducts([...ranked, ...unranked]);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();

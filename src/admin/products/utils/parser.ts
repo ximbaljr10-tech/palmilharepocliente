@@ -51,6 +51,19 @@ export function parseProduct(p: ProductData): ParsedProduct {
   const group = detectGroup(title, metadata);
   const isLine = yards !== null;
 
+  // ============================================================================
+  // PRICE PARSING — Medusa V2 retorna REAIS (decimal) em ambas as APIs:
+  //
+  //   • Store API (`calculated_price.calculated_amount`): REAIS decimal.
+  //     Ex.: 45.4 → R$ 45,40.
+  //
+  //   • Admin API (`variant.prices[].amount`): TAMBÉM REAIS decimal.
+  //     Ex.: 45.4 → R$ 45,40.  Confirmado via curl na API real.
+  //
+  // BUG CORRIGIDO: o parser anterior tratava `prices[].amount` como centavos
+  // e dividia por 100, fazendo R$ 45,40 virar R$ 0,45 no admin. Agora
+  // tratamos ambas as origens como REAIS — que é o formato real do Medusa V2.
+  // ============================================================================
   const allPrices = variant?.prices || [];
   const brlPrice = allPrices.find((pr: any) => pr.currency_code === 'brl');
   const priceFromAdmin = brlPrice || allPrices[0];
@@ -58,10 +71,13 @@ export function parseProduct(p: ProductData): ParsedProduct {
   let price = 0;
   let priceDisplay = '--';
   if (priceFromStore != null) {
+    // Store API — reais (decimal).
     price = Number(priceFromStore);
     priceDisplay = price.toFixed(2).replace('.', ',');
   } else if (priceFromAdmin?.amount != null) {
+    // Admin API — TAMBÉM reais (decimal) no Medusa V2.
     price = Number(priceFromAdmin.amount);
+    if (!Number.isFinite(price)) price = 0;
     priceDisplay = price.toFixed(2).replace('.', ',');
   }
 

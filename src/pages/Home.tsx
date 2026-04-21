@@ -8,6 +8,18 @@ import { Search, Filter, Loader2, Pointer, BookOpen } from 'lucide-react';
 
 const LOGO_URL = "https://d1a9qnv764bsoo.cloudfront.net/stores/002/383/186/themes/common/logo-2076434406-1663802435-2137b08583cacd89f0378fc3f37146e01663802435.png?0";
 
+/** Sort products by admin-defined rank. Ranked items first, then unranked. */
+function sortByRank(products: Product[]): Product[] {
+  const getRank = (p: Product): number | null => {
+    const r = p.metadata?.rank;
+    if (typeof r === 'number' && !isNaN(r)) return r;
+    if (typeof r === 'string' && r.trim() !== '' && !isNaN(Number(r))) return Number(r);
+    return null;
+  };
+  const ranked = products.filter(p => getRank(p) !== null).sort((a, b) => getRank(a)! - getRank(b)!);
+  const unranked = products.filter(p => getRank(p) === null);
+  return [...ranked, ...unranked];
+}
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const { addToCart } = useCart();
@@ -204,11 +216,13 @@ export default function Home() {
     setLoading(true);
     try {
       // Load ALL published products in a single request.
-      // The Store API only returns published products (max ~200 currently).
-      // Using limit=300 ensures we get everything in one request,
-      // eliminating the two-stage loading that caused partial rendering.
       const res = await api.getProducts(300, 0);
-      const all = res.products.filter(p => !p.title.startsWith('Medusa '));
+      let all = res.products.filter(p => !p.title.startsWith('Medusa '));
+
+      // Sort by admin-defined rank: ranked products first (ascending rank),
+      // then unranked products in their original API order.
+      all = sortByRank(all);
+
       setTotalServerCount(res.count);
       setAllProducts(all);
       setProducts(all);

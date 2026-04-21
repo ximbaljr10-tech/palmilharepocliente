@@ -17,9 +17,44 @@
 // - Cada view é completamente focada em UMA tarefa.
 // ============================================================================
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 
 import type { ParsedProduct, ViewMode } from './types';
+
+// ============================================================================
+// Persistência da view ativa (query param ?view=rank)
+// ----------------------------------------------------------------------------
+// Antes: a `view` vivia só no useState local. Ao recarregar a página ou
+// compartilhar URL, o operador voltava sempre pra tela inicial — perdia
+// contexto no meio da tarefa.
+//
+// Agora: sincronizamos `view` com `?view=...` na URL. Benefícios:
+//   1. F5 não perde a tela atual.
+//   2. Botão voltar do navegador volta pra view anterior.
+//   3. URL pode ser compartilhada: /store/admin/produtos?view=rank
+// ============================================================================
+const VALID_VIEWS: ViewMode[] = ['home', 'list', 'colors', 'yards', 'rank', 'reorder'];
+
+function readViewFromURL(): ViewMode {
+  if (typeof window === 'undefined') return 'home';
+  try {
+    const p = new URLSearchParams(window.location.search).get('view');
+    if (p && (VALID_VIEWS as string[]).includes(p)) return p as ViewMode;
+  } catch (_) {}
+  return 'home';
+}
+
+function writeViewToURL(v: ViewMode) {
+  if (typeof window === 'undefined') return;
+  try {
+    const url = new URL(window.location.href);
+    if (v === 'home') url.searchParams.delete('view');
+    else url.searchParams.set('view', v);
+    // pushState para que o botão "voltar" do navegador funcione corretamente.
+    // Antes era replaceState — agora cada mudança de view fica no histórico.
+    window.history.pushState({ view: v }, '', url.toString());
+  } catch (_) {}
+}
 
 import { useProducts } from './hooks/useProducts';
 import { useBulkActions } from './hooks/useBulkActions';
@@ -58,7 +93,19 @@ export default function AdminProducts() {
   });
 
   // ------------------------ View routing ------------------------
-  const [view, setView] = useState<ViewMode>('home');
+  // Inicializa a partir da URL (?view=…) — sobrevive a F5.
+  const [view, setViewState] = useState<ViewMode>(() => readViewFromURL());
+  const setView = useCallback((v: ViewMode) => {
+    setViewState(v);
+    writeViewToURL(v);
+  }, []);
+
+  // Se o usuário usar "voltar" do navegador, reaplica a view da URL.
+  useEffect(() => {
+    const onPop = () => setViewState(readViewFromURL());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // ------------------------ Selection state (para list view) ------------------------
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -225,6 +272,13 @@ export default function AdminProducts() {
           onSave={handleReorderSave}
           saving={bulk.bulkSaving}
           title={reorderState.label}
+          // Permite abrir o editor direto a partir do ReorderMode — resolve
+          // o caso em que o nome do produto estava truncado e o operador
+          // queria ver detalhes / corrigir dados.
+          onEditProduct={(p) => {
+            setReorderState(null);
+            setEditingProduct(p);
+          }}
         />
         {toast && <Toast message={toast.message} type={toast.type} onClose={dismissToast} />}
       </>
