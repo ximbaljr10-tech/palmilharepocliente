@@ -1040,23 +1040,74 @@ export default function AdminOrders() {
     }
     if (isLabelsV2Enabled()) {
       setPrintingLabels(true);
-      setLabelsJobStatus({ remessa_id: remessaId, remessa_code: rem.code, status: 'pending', current: 0, total: ordersForLabels.length, message: 'Preparando...' });
+      // Feedback IMEDIATO (antes de qualquer request) — o toast já aparece no topo.
+      setLabelsJobStatus({
+        remessa_id: remessaId,
+        remessa_code: rem.code,
+        status: 'pending',
+        current: 0,
+        total: ordersForLabels.length,
+        message: `Iniciando geração de ${ordersForLabels.length} etiqueta${ordersForLabels.length !== 1 ? 's' : ''}... Aguarde.`,
+      });
       try {
         const res = await ensureAndDownloadRemessaLabels(remessaId, rem.code, (st) => {
-          setLabelsJobStatus({ remessa_id: remessaId, remessa_code: rem.code, status: st.status, current: st.progress_current || 0, total: st.progress_total || ordersForLabels.length, message: st.message });
+          // Mensagens humanizadas por estado
+          let humanMsg = st.message;
+          if (st.status === 'pending') humanMsg = 'Na fila, aguardando iniciar...';
+          else if (st.status === 'building') {
+            humanMsg = st.progress_total > 0
+              ? `Baixando etiqueta ${st.progress_current} de ${st.progress_total} da SuperFrete...`
+              : 'Conectando à SuperFrete...';
+          } else if (st.status === 'ready') humanMsg = 'PDF pronto! Iniciando download...';
+          else if (st.status === 'error') humanMsg = st.error || 'Falha ao gerar etiquetas.';
+
+          setLabelsJobStatus({
+            remessa_id: remessaId,
+            remessa_code: rem.code,
+            status: st.status,
+            current: st.progress_current || 0,
+            total: st.progress_total || ordersForLabels.length,
+            message: humanMsg,
+          });
         });
         if (!res.success) {
-          alert(res.error || 'Erro ao gerar etiquetas.');
+          // Em vez de alert (feio e trava o overlay), mostra o erro no próprio toast
+          setLabelsJobStatus({
+            remessa_id: remessaId,
+            remessa_code: rem.code,
+            status: 'error',
+            current: 0,
+            total: ordersForLabels.length,
+            message: res.error || 'Erro ao gerar etiquetas.',
+          });
         } else {
+          setLabelsJobStatus({
+            remessa_id: remessaId,
+            remessa_code: rem.code,
+            status: 'ready',
+            current: ordersForLabels.length,
+            total: ordersForLabels.length,
+            message: `PDF baixado com ${ordersForLabels.length} etiqueta${ordersForLabels.length !== 1 ? 's' : ''}.`,
+          });
           setRemessaMessage({ type: 'success', text: `Etiquetas da ${rem.code} baixadas com sucesso.` });
           logRemessaLabelExport(remessaId).catch(() => {});
           setTimeout(() => setRemessaMessage(null), 5000);
         }
       } catch (err: any) {
-        alert(err.message || 'Erro ao imprimir etiquetas.');
+        setLabelsJobStatus({
+          remessa_id: remessaId,
+          remessa_code: rem.code,
+          status: 'error',
+          current: 0,
+          total: ordersForLabels.length,
+          message: err.message || 'Erro ao imprimir etiquetas.',
+        });
       } finally {
         setPrintingLabels(false);
-        setTimeout(() => setLabelsJobStatus(null), 3500);
+        // Sucesso/erro somem após 6s (tempo de ler); em progresso não some
+        setTimeout(() => {
+          setLabelsJobStatus(prev => (prev && (prev.status === 'ready' || prev.status === 'error')) ? null : prev);
+        }, 6000);
       }
       return;
     }
@@ -1108,37 +1159,67 @@ export default function AdminOrders() {
         </div>
       )}
 
-      {/* ============ LABELS v2: progresso da geracao (banner legivel p/ humanos) ============ */}
+      {/* ============ LABELS v2: TOAST FLUTUANTE (fixed + z-[70] — fica ACIMA do overlay z-50) ============ */}
+      {/* Aparece no topo da tela, visível mesmo com overlay de remessas aberto. */}
       {labelsJobStatus && (
-        <div className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm border ${
-          labelsJobStatus.status === 'ready' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
-          labelsJobStatus.status === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
-          'bg-blue-50 border-blue-200 text-blue-700'
-        }`}>
-          {labelsJobStatus.status === 'ready' ? (
-            <CheckCircle2 size={16} className="shrink-0" />
-          ) : labelsJobStatus.status === 'error' ? (
-            <XCircle size={16} className="shrink-0" />
-          ) : (
-            <Loader2 size={16} className="animate-spin shrink-0" />
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="font-bold text-xs">
-              Etiquetas da {labelsJobStatus.remessa_code}
-              {labelsJobStatus.total > 0 && labelsJobStatus.status === 'building' && (
-                <span className="ml-2 text-[10px] opacity-70">
-                  {labelsJobStatus.current}/{labelsJobStatus.total}
-                </span>
+        <div
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-1rem)] sm:w-auto sm:min-w-[380px] sm:max-w-[560px] pointer-events-none"
+          role="status"
+          aria-live="polite"
+        >
+          <div
+            className={`flex items-start gap-3 rounded-2xl px-4 py-3 shadow-2xl border-2 backdrop-blur-sm pointer-events-auto ${
+              labelsJobStatus.status === 'ready'
+                ? 'bg-emerald-50/95 border-emerald-300 text-emerald-800'
+                : labelsJobStatus.status === 'error'
+                ? 'bg-red-50/95 border-red-300 text-red-800'
+                : 'bg-blue-50/95 border-blue-300 text-blue-800'
+            }`}
+          >
+            {labelsJobStatus.status === 'ready' ? (
+              <CheckCircle2 size={20} className="shrink-0 mt-0.5" />
+            ) : labelsJobStatus.status === 'error' ? (
+              <XCircle size={20} className="shrink-0 mt-0.5" />
+            ) : (
+              <Loader2 size={20} className="animate-spin shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-sm leading-tight">
+                {labelsJobStatus.status === 'ready'
+                  ? `Pronto! Etiquetas da ${labelsJobStatus.remessa_code} baixadas.`
+                  : labelsJobStatus.status === 'error'
+                  ? `Erro ao gerar etiquetas da ${labelsJobStatus.remessa_code}`
+                  : `Gerando etiquetas da ${labelsJobStatus.remessa_code}...`}
+                {labelsJobStatus.total > 0 && labelsJobStatus.status === 'building' && (
+                  <span className="ml-2 text-xs font-mono opacity-70">
+                    {labelsJobStatus.current}/{labelsJobStatus.total}
+                  </span>
+                )}
+              </p>
+              <p className="text-xs opacity-80 mt-0.5 leading-snug">{labelsJobStatus.message}</p>
+              {(labelsJobStatus.status === 'building' || labelsJobStatus.status === 'pending') && (
+                <div className="mt-2 w-full bg-blue-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-500 ${
+                      labelsJobStatus.total > 0 ? 'bg-blue-500' : 'bg-blue-400 animate-pulse w-full'
+                    }`}
+                    style={
+                      labelsJobStatus.total > 0
+                        ? { width: `${Math.max(4, Math.min(100, (labelsJobStatus.current / labelsJobStatus.total) * 100))}%` }
+                        : undefined
+                    }
+                  />
+                </div>
               )}
-            </p>
-            <p className="text-[10px] opacity-80 truncate">{labelsJobStatus.message}</p>
-            {labelsJobStatus.status === 'building' && labelsJobStatus.total > 0 && (
-              <div className="mt-1.5 w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-blue-500 h-full transition-all duration-300"
-                  style={{ width: `${Math.min(100, (labelsJobStatus.current / labelsJobStatus.total) * 100)}%` }}
-                />
-              </div>
+            </div>
+            {(labelsJobStatus.status === 'ready' || labelsJobStatus.status === 'error') && (
+              <button
+                onClick={() => setLabelsJobStatus(null)}
+                className="p-1 rounded-lg hover:bg-black/5 transition-colors shrink-0"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
             )}
           </div>
         </div>
@@ -1960,6 +2041,7 @@ export default function AdminOrders() {
           onDownload={handleDownloadPDF}
           onShare={handleSharePDF}
           onDelete={(pdf) => handleDeletePDF(pdf.id)}
+          labelsJobStatus={labelsJobStatus}
         />
       )}
 

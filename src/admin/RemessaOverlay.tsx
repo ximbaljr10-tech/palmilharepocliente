@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Package, X, Download, Printer, RotateCcw, FileText, Share2, Trash2, Loader2 } from 'lucide-react';
+import { Package, X, Download, Printer, RotateCcw, FileText, Share2, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import type { Remessa, OrderRemessaMap } from './adminApi';
 
 interface GeneratedPDF {
@@ -12,9 +12,19 @@ interface GeneratedPDF {
   dataUrl: string;
 }
 
+// Tipo do status de geração de etiquetas (compatível com o state em AdminOrders)
+interface LabelsJobStatusUI {
+  remessa_id: number;
+  remessa_code: string;
+  status: 'pending' | 'building' | 'ready' | 'error';
+  current: number;
+  total: number;
+  message: string;
+}
+
 export default function RemessaManagementOverlay({
   remessas, allOrders, onClose, onPDF, onLabels, onUndo, onCloseRemessa, onReopen,
-  savedPDFs, onDownload, onShare, onDelete,
+  savedPDFs, onDownload, onShare, onDelete, labelsJobStatus,
 }: {
   remessas: Remessa[];
   allOrders: any[];
@@ -28,6 +38,7 @@ export default function RemessaManagementOverlay({
   onDownload: (pdf: GeneratedPDF) => void;
   onShare: (pdf: GeneratedPDF) => void;
   onDelete: (pdf: GeneratedPDF) => void;
+  labelsJobStatus?: LabelsJobStatusUI | null;
 }) {
   const [tab, setTab] = useState<'active' | 'history' | 'pdfs'>('active');
   const activeRemessas = remessas.filter(r => r.status === 'open' || r.status === 'closed');
@@ -48,6 +59,69 @@ export default function RemessaManagementOverlay({
             <X size={18} />
           </button>
         </div>
+
+        {/* ============ BARRA DE STATUS DE ETIQUETAS (visível DENTRO do overlay) ============ */}
+        {/* Feedback redundante ao toast flutuante — garante que usuário veja progresso sem precisar fechar o overlay. */}
+        {labelsJobStatus && (
+          <div
+            className={`px-5 py-3 border-b-2 shrink-0 ${
+              labelsJobStatus.status === 'ready'
+                ? 'bg-emerald-50 border-emerald-300'
+                : labelsJobStatus.status === 'error'
+                ? 'bg-red-50 border-red-300'
+                : 'bg-blue-50 border-blue-300'
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-3">
+              {labelsJobStatus.status === 'ready' ? (
+                <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+              ) : labelsJobStatus.status === 'error' ? (
+                <XCircle size={18} className="text-red-600 shrink-0 mt-0.5" />
+              ) : (
+                <Loader2 size={18} className="text-blue-600 animate-spin shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-bold ${
+                  labelsJobStatus.status === 'ready' ? 'text-emerald-800'
+                  : labelsJobStatus.status === 'error' ? 'text-red-800'
+                  : 'text-blue-800'
+                }`}>
+                  {labelsJobStatus.status === 'ready'
+                    ? `Pronto! ${labelsJobStatus.remessa_code} — PDF baixado.`
+                    : labelsJobStatus.status === 'error'
+                    ? `Erro em ${labelsJobStatus.remessa_code}`
+                    : `Gerando etiquetas de ${labelsJobStatus.remessa_code}`}
+                  {labelsJobStatus.total > 0 && labelsJobStatus.status === 'building' && (
+                    <span className="ml-2 text-[10px] font-mono opacity-70">
+                      {labelsJobStatus.current}/{labelsJobStatus.total}
+                    </span>
+                  )}
+                </p>
+                <p className={`text-[11px] mt-0.5 leading-snug ${
+                  labelsJobStatus.status === 'ready' ? 'text-emerald-700'
+                  : labelsJobStatus.status === 'error' ? 'text-red-700'
+                  : 'text-blue-700'
+                }`}>{labelsJobStatus.message}</p>
+                {(labelsJobStatus.status === 'building' || labelsJobStatus.status === 'pending') && (
+                  <div className="mt-2 w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        labelsJobStatus.total > 0 ? 'bg-blue-500' : 'bg-blue-400 animate-pulse w-full'
+                      }`}
+                      style={
+                        labelsJobStatus.total > 0
+                          ? { width: `${Math.max(4, Math.min(100, (labelsJobStatus.current / labelsJobStatus.total) * 100))}%` }
+                          : undefined
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex border-b border-zinc-100 shrink-0">
           <button onClick={() => setTab('active')} className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${tab === 'active' ? 'text-zinc-900 border-b-2 border-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}>
             Ativas ({activeRemessas.length})
@@ -97,11 +171,35 @@ export default function RemessaManagementOverlay({
                           <button onClick={() => onPDF(rem.id)} className="bg-zinc-900 text-white px-3 py-1.5 rounded-xl text-[11px] font-bold hover:bg-zinc-800 flex items-center gap-1.5 transition-colors">
                             <Download size={11} /> PDF
                           </button>
-                          {withLabel > 0 && (
-                            <button onClick={() => onLabels(rem.id)} className="bg-orange-500 text-white px-3 py-1.5 rounded-xl text-[11px] font-bold hover:bg-orange-600 flex items-center gap-1.5 transition-colors">
-                              <Printer size={11} /> Etiquetas
-                            </button>
-                          )}
+                          {withLabel > 0 && (() => {
+                            const isThisProcessing = !!labelsJobStatus
+                              && labelsJobStatus.remessa_id === rem.id
+                              && (labelsJobStatus.status === 'pending' || labelsJobStatus.status === 'building');
+                            return (
+                              <button
+                                onClick={() => onLabels(rem.id)}
+                                disabled={isThisProcessing}
+                                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-colors ${
+                                  isThisProcessing
+                                    ? 'bg-blue-500 text-white cursor-wait'
+                                    : 'bg-orange-500 text-white hover:bg-orange-600'
+                                }`}
+                              >
+                                {isThisProcessing ? (
+                                  <>
+                                    <Loader2 size={11} className="animate-spin" />
+                                    {labelsJobStatus && labelsJobStatus.total > 0
+                                      ? `${labelsJobStatus.current}/${labelsJobStatus.total}`
+                                      : 'Gerando...'}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Printer size={11} /> Etiquetas
+                                  </>
+                                )}
+                              </button>
+                            );
+                          })()}
                           {rem.status === 'open' && (
                             <>
                               <button onClick={() => onCloseRemessa(rem.id)} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl text-[11px] font-semibold border border-blue-200 hover:bg-blue-100 transition-colors">Fechar</button>
