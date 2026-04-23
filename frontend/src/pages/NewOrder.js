@@ -7,7 +7,8 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
 
-const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
+import { BACKEND_URL } from '../config';
+const API_BASE = BACKEND_URL;
 const MAX_FILE_MB = 8;
 const ALLOWED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'];
 

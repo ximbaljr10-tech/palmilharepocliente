@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../config';
 import { LogOut, LayoutDashboard, Users, Settings, Activity, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
@@ -13,33 +14,43 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ pro_count: 0, order_count: 0, recent_orders: [] });
   const [settings, setSettings] = useState({});
   const [activeTab, setActiveTab] = useState('overview');
-  
+  const [pros, setPros] = useState([]);
+
   // WA States
   const [waStatus, setWaStatus] = useState({ connected: false, hasQR: false });
   const [waQR, setWaQR] = useState(null);
 
   const fetchDashboard = async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/admin/dashboard`, { withCredentials: true });
+      const res = await axios.get(api(`/api/admin/dashboard`), { withCredentials: true });
       setStats(res.data);
     } catch (err) {
       toast.error('Erro ao buscar dados do painel.');
     }
   };
 
+  const fetchPros = async () => {
+    try {
+      const res = await axios.get(api(`/api/admin/professionals`), { withCredentials: true });
+      setPros(res.data);
+    } catch (err) {
+      toast.error('Erro ao buscar profissionais.');
+    }
+  };
+
   const fetchSettings = async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/admin/settings`, { withCredentials: true });
+      const res = await axios.get(api(`/api/admin/settings`), { withCredentials: true });
       setSettings(res.data);
     } catch (err) {}
   };
 
   const checkWaStatus = async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/status`, { withCredentials: true });
+      const res = await axios.get(api(`/api/admin/whatsapp/status`), { withCredentials: true });
       setWaStatus(res.data);
       if (res.data.hasQR && !res.data.connected) {
-        const qrRes = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/qr`, { withCredentials: true });
+        const qrRes = await axios.get(api(`/api/admin/whatsapp/qr`), { withCredentials: true });
         setWaQR(qrRes.data.qr);
       } else {
         setWaQR(null);
@@ -58,12 +69,15 @@ export default function AdminDashboard() {
       const interval = setInterval(checkWaStatus, 3000);
       return () => clearInterval(interval);
     }
+    if (activeTab === 'pros') {
+      fetchPros();
+    }
   }, [activeTab]);
 
   const handleSettingsSave = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/settings`, settings, { withCredentials: true });
+      await axios.post(api(`/api/admin/settings`), settings, { withCredentials: true });
       toast.success('Configurações salvas com sucesso.');
     } catch (err) {
       toast.error('Erro ao salvar.');
@@ -72,14 +86,14 @@ export default function AdminDashboard() {
 
   const handleWaConnect = async () => {
     try {
-      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/connect`, {}, { withCredentials: true });
+      await axios.post(api(`/api/admin/whatsapp/connect`), {}, { withCredentials: true });
       toast.info('Gerando QR Code...');
     } catch (err) {}
   };
 
   const handleWaDisconnect = async () => {
     try {
-      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/admin/whatsapp/disconnect`, {}, { withCredentials: true });
+      await axios.post(api(`/api/admin/whatsapp/disconnect`), {}, { withCredentials: true });
       toast.info('Desconectado.');
     } catch (err) {}
   };
@@ -91,6 +105,9 @@ export default function AdminDashboard() {
         <nav className="flex-1 space-y-2">
           <Button variant={activeTab === 'overview' ? 'default' : 'ghost'} className={`w-full justify-start rounded-none ${activeTab === 'overview' ? 'bg-primary text-white' : ''}`} onClick={() => setActiveTab('overview')} data-testid="tab-overview">
             <LayoutDashboard className="mr-2 h-4 w-4" /> Visão Geral
+          </Button>
+          <Button variant={activeTab === 'pros' ? 'default' : 'ghost'} className={`w-full justify-start rounded-none ${activeTab === 'pros' ? 'bg-primary text-white' : ''}`} onClick={() => setActiveTab('pros')} data-testid="tab-pros">
+            <Users className="mr-2 h-4 w-4" /> Profissionais
           </Button>
           <Button variant={activeTab === 'settings' ? 'default' : 'ghost'} className={`w-full justify-start rounded-none ${activeTab === 'settings' ? 'bg-primary text-white' : ''}`} onClick={() => setActiveTab('settings')} data-testid="tab-settings">
             <Settings className="mr-2 h-4 w-4" /> Integrações
@@ -157,6 +174,34 @@ export default function AdminDashboard() {
                       <td className="px-6 py-4">{order.patient_id.substring(0,8)}...</td>
                       <td className="px-6 py-4"><span className="px-2 py-1 bg-primary/10 text-primary text-xs font-bold">{order.status}</span></td>
                       <td className="px-6 py-4 text-right font-mono">R$ {order.price.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'pros' && (
+          <div className="space-y-6">
+            <h2 className="text-xl font-heading font-medium">Profissionais Cadastrados</h2>
+            <div className="border border-border">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-muted-foreground uppercase bg-secondary/50 border-b border-border">
+                  <tr>
+                    <th className="px-6 py-4">Nome</th>
+                    <th className="px-6 py-4">Email</th>
+                    <th className="px-6 py-4">Cadastrado em</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pros.length === 0 ? (
+                    <tr><td colSpan="3" className="px-6 py-8 text-center text-muted-foreground">Nenhum profissional cadastrado.</td></tr>
+                  ) : pros.map(p => (
+                    <tr key={p._id} className="border-b border-border/50 bg-card hover:bg-secondary/30">
+                      <td className="px-6 py-4 font-medium">{p.name}</td>
+                      <td className="px-6 py-4 text-muted-foreground">{p.email}</td>
+                      <td className="px-6 py-4 text-xs">{p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '-'}</td>
                     </tr>
                   ))}
                 </tbody>

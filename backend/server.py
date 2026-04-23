@@ -24,14 +24,29 @@ from routes import auth, admin, pro, orders, uploads
 app = FastAPI(title="Axiom Biomechanics API", version="1.1.0")
 
 # --- CORS ---
-# Em produção, FRONTEND_URL deve ser a URL pública do Vercel (ex: https://palmilha.vercel.app).
-# Vários origins podem ser passados separados por vírgula.
-_raw_frontend = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+# FRONTEND_URL: lista de origens EXATAS separadas por vírgula.
+# Além disso, usamos uma regex para aceitar QUALQUER subdomínio *.vercel.app e
+# *.sslip.io — assim o deploy no Vercel funciona sem configuração extra, mesmo
+# quando o Vercel gera URLs com hash de preview (tipo xxxxx-git-main-xxxx.vercel.app).
+_raw_frontend = os.environ.get(
+    "FRONTEND_URL",
+    "http://localhost:3000,http://127.0.0.1:3000,https://app.91-98-154-218.sslip.io",
+)
 allowed_origins = [o.strip() for o in _raw_frontend.split(",") if o.strip()]
+
+# Regex: http(s)://localhost[:porta], http(s)://127.0.0.1[:porta],
+# https://*.vercel.app, https://*.sslip.io
+_origin_regex = (
+    r"^(https?://localhost(:\d+)?|"
+    r"https?://127\.0\.0\.1(:\d+)?|"
+    r"https://[a-zA-Z0-9-]+\.vercel\.app|"
+    r"https://[a-zA-Z0-9-]+\.sslip\.io)$"
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],

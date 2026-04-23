@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { api } from '../config';
 import { LogOut, FilePlus, UserPlus, FileText, CheckCircle2, AlertCircle, DollarSign, Send } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
@@ -26,7 +27,7 @@ export default function ProDashboard() {
 
   const fetchData = async () => {
     try {
-      const res = await axios.get(`${process.env.REACT_APP_BACKEND_URL}/api/pro/dashboard`, { withCredentials: true });
+      const res = await axios.get(api(`/api/pro/dashboard`), { withCredentials: true });
       setStats(res.data);
     } catch (err) {
       toast.error('Erro ao carregar dados.');
@@ -39,7 +40,7 @@ export default function ProDashboard() {
 
   const handleGenerateBilling = async (orderId) => {
     try {
-      const res = await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/orders/${orderId}/billing`, {}, { withCredentials: true });
+      const res = await axios.post(api(`/api/orders/${orderId}/billing`), {}, { withCredentials: true });
       if (res.data.needs_completion) {
         // Open modal
         setCurrentPatientId(res.data.patient._id);
@@ -64,7 +65,7 @@ export default function ProDashboard() {
 
   const handleSendInvoice = async (orderId) => {
     try {
-      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/orders/${orderId}/send-invoice`, {}, { withCredentials: true });
+      await axios.post(api(`/api/orders/${orderId}/send-invoice`), {}, { withCredentials: true });
       toast.success('Fatura enviada via WhatsApp!');
       fetchData();
     } catch (err) {
@@ -81,7 +82,7 @@ export default function ProDashboard() {
     }
     
     try {
-      await axios.put(`${process.env.REACT_APP_BACKEND_URL}/api/pro/patients/${currentPatientId}`, billingForm, { withCredentials: true });
+      await axios.put(api(`/api/pro/patients/${currentPatientId}`), billingForm, { withCredentials: true });
       setBillingModalOpen(false);
       // Retry billing
       await handleGenerateBilling(currentOrderId);

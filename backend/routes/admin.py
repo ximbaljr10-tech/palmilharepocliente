@@ -38,9 +38,12 @@ async def get_professionals(request: Request, admin=Depends(get_admin_user)):
     db = request.app.mongodb
     pros = await db.users.find(
         {"role": "professional"}, {"password_hash": 0}
-    ).to_list(100)
+    ).sort("created_at", -1).to_list(500)
+    from datetime import datetime
     for p in pros:
         p["_id"] = str(p["_id"])
+        if isinstance(p.get("created_at"), datetime):
+            p["created_at"] = p["created_at"].isoformat()
     return pros
 
 
