@@ -13,7 +13,7 @@ module.exports = {
   apps: [
     {
       name: "axiom-backend",
-      cwd: "./backend",
+      cwd: "/home/root/webapp/backend",
       script: "/home/root/venv/bin/uvicorn",
       args: "server:app --host 0.0.0.0 --port 8001 --workers 2 --log-level info",
       interpreter: "none",
@@ -25,14 +25,14 @@ module.exports = {
       watch: false,
       max_restarts: 10,
       restart_delay: 3000,
-      out_file: "./logs/backend.out.log",
-      error_file: "./logs/backend.err.log",
+      out_file: "/home/root/webapp/logs/backend.out.log",
+      error_file: "/home/root/webapp/logs/backend.err.log",
       merge_logs: true,
       time: true
     },
     {
       name: "axiom-whatsapp",
-      cwd: "./whatsapp-service",
+      cwd: "/home/root/webapp/whatsapp-service",
       script: "index.js",
       interpreter: "node",
       env: {
@@ -43,8 +43,8 @@ module.exports = {
       watch: false,
       max_restarts: 20,
       restart_delay: 5000,
-      out_file: "../logs/whatsapp.out.log",
-      error_file: "../logs/whatsapp.err.log",
+      out_file: "/home/root/webapp/logs/whatsapp.out.log",
+      error_file: "/home/root/webapp/logs/whatsapp.err.log",
       merge_logs: true,
       time: true
     }

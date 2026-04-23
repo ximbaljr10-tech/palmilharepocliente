@@ -1,0 +1,22 @@
+[Unit]
+Description=MongoDB Database Server (Axiom)
+After=network.target
+
+[Service]
+Type=forking
+User=root
+ExecStart=/opt/mongodb/mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb --bind_ip 127.0.0.1 --port 27017
+ExecStop=/opt/mongodb/mongod --shutdown --dbpath /var/lib/mongodb
+Restart=on-failure
+RestartSec=5
+LimitFSIZE=infinity
+LimitCPU=infinity
+LimitAS=infinity
+LimitNOFILE=64000
+LimitNPROC=64000
+LimitMEMLOCK=infinity
+TasksMax=infinity
+TasksAccounting=false
+
+[Install]
+WantedBy=multi-user.target
