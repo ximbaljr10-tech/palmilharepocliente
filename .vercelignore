@@ -1,28 +1,27 @@
-# Backend Python (deploy em outro serviço como Railway/Render)
+# Backend (não é hospedado no Vercel)
 backend/
+
+# WhatsApp service (roda no servidor, NÃO no Vercel)
 whatsapp-service/
+
+# Testes e utilitários
 tests/
 test_reports/
 memory/
-.emergent/
-
-# Arquivos de teste
 backend_test.py
 test_flows.py
 test_wa.py
 test_result.md
 
-# Assets pesados não usados no frontend final
+# Assets brutos pesados que não fazem parte do bundle
 insole_raw.png
 
-# Git/CI
+# Git / CI / docs internas
 .git/
 .github/
-
-# Docs
 design_guidelines.json
 
-# Node/Python cache
+# Caches
 node_modules/
 __pycache__/
 *.pyc

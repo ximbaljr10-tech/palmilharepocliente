@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, FilePlus, UserPlus, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { LogOut, FilePlus, UserPlus, FileText, CheckCircle2, AlertCircle, DollarSign, Send } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -59,6 +59,17 @@ export default function ProDashboard() {
       }
     } catch (err) {
       toast.error('Erro ao gerar cobrança.');
+    }
+  };
+
+  const handleSendInvoice = async (orderId) => {
+    try {
+      await axios.post(`${process.env.REACT_APP_BACKEND_URL}/api/orders/${orderId}/send-invoice`, {}, { withCredentials: true });
+      toast.success('Fatura enviada via WhatsApp!');
+      fetchData();
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Erro ao enviar fatura.';
+      toast.error(msg);
     }
   };
 
@@ -150,17 +161,19 @@ export default function ProDashboard() {
                   <td className="px-6 py-4 whitespace-nowrap">{new Date(order.created_at).toLocaleDateString('pt-BR')}</td>
                   <td className="px-6 py-4">{order.patient_name} <br/><span className="text-xs text-muted-foreground">ID: {order.patient_id.substring(0,6)}</span></td>
                   <td className="px-6 py-4"><span className="px-2 py-1 bg-primary/10 text-primary text-xs font-bold border border-primary/20">{order.status}</span></td>
-                  <td className="px-6 py-4">
-                    {order.payment_link ? (
-                      order.payment_link.startsWith('000201') ? (
-                        <span className="text-success flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Pix Enviado</span>
-                      ) : (
-                        <span className="text-muted-foreground">Erro PIX</span>
-                      )
-                    ) : (
+                  <td className="px-6 py-4 space-y-1">
+                    {!order.payment_link && (
                       <Button variant="outline" size="sm" className="rounded-none h-8 text-xs border-primary text-primary hover:bg-primary hover:text-white" onClick={() => handleGenerateBilling(order._id)}>
                         <DollarSign className="w-3 h-3 mr-1" /> Gerar Cobrança
                       </Button>
+                    )}
+                    {order.payment_link && !order.invoice_sent_at && (
+                      <Button variant="outline" size="sm" className="rounded-none h-8 text-xs border-primary text-primary hover:bg-primary hover:text-white" onClick={() => handleSendInvoice(order._id)}>
+                        <Send className="w-3 h-3 mr-1" /> Enviar Fatura
+                      </Button>
+                    )}
+                    {order.invoice_sent_at && (
+                      <span className="text-success flex items-center gap-1 text-xs"><CheckCircle2 className="w-3 h-3"/> Fatura enviada</span>
                     )}
                   </td>
                 </tr>

@@ -1,21 +1,20 @@
 {
   "name": "whatsapp-service",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Axiom WhatsApp bridge (Baileys) — roda fora do Vercel, no servidor.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "axios": "^1.15.0",
     "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
-    "redis": "^5.11.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4"
   }
 }

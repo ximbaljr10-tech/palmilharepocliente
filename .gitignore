@@ -92,3 +92,11 @@ credentials.json
 !.env.example
 !**/.env.example
 !frontend/.env
+
+# WhatsApp Baileys session (secret)
+whatsapp-service/auth_info_baileys/
+
+# PM2 runtime logs
+logs/
+
+# Package locks podem ficar versionados; mantemos yarn.lock do frontend.
