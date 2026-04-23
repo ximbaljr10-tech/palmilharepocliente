@@ -21,7 +21,19 @@ export default function Login() {
       toast.success('Login realizado com sucesso!');
       navigate('/dashboard'); // Redirection will be handled by ProtectedRoute based on role
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Erro ao realizar login. Verifique as credenciais.');
+      // Mostra erro PRECISO com codigo HTTP e detalhe do backend
+      let msg;
+      if (err.response) {
+        const status = err.response.status;
+        const detail = err.response.data?.detail || err.response.statusText || 'Erro desconhecido';
+        msg = `Erro ${status}: ${detail}`;
+      } else if (err.request) {
+        msg = `Erro de rede: ${err.message}. Servidor pode estar offline ou bloqueado por CORS.`;
+      } else {
+        msg = `Erro interno: ${err.message}`;
+      }
+      console.error('[Login] erro completo:', err);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

@@ -22,7 +22,22 @@ export default function Register() {
       toast.success('Conta criada com sucesso!');
       navigate('/dashboard');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Erro ao criar conta.');
+      // Mostra erro PRECISO com codigo HTTP e detalhe do backend
+      let msg;
+      if (err.response) {
+        // Backend respondeu com erro HTTP (400, 401, 500, etc)
+        const status = err.response.status;
+        const detail = err.response.data?.detail || err.response.statusText || 'Erro desconhecido';
+        msg = `Erro ${status}: ${detail}`;
+      } else if (err.request) {
+        // Request foi feito mas sem resposta (CORS, rede, servidor offline)
+        msg = `Erro de rede: ${err.message}. Servidor pode estar offline ou bloqueado por CORS.`;
+      } else {
+        // Erro ao montar o request (URL invalida, etc)
+        msg = `Erro interno: ${err.message}`;
+      }
+      console.error('[Register] erro completo:', err);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }

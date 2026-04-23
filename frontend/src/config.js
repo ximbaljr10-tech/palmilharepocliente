@@ -1,23 +1,16 @@
 /**
- * Configuração central do frontend.
+ * Configuração central do frontend — URL do backend HARDCODED.
  *
- * A URL do backend fica HARDCODED aqui para garantir que o build do Vercel
- * funcione mesmo sem env vars configuradas. Se um dia você mudar o backend
- * de servidor, é só editar esta constante e fazer um novo deploy.
+ * Aqui a URL é FIXA no código. Não lemos mais de process.env.REACT_APP_BACKEND_URL
+ * porque qualquer .env deixado no projeto acabava substituindo durante o build
+ * do Vercel (e quebrava com "localhost:8001" em produção).
  *
- * Ordem de precedência:
- *   1. process.env.REACT_APP_BACKEND_URL (se definida no build)
- *   2. BACKEND_URL_FALLBACK abaixo (valor padrão gravado no bundle)
+ * Para mudar o backend: edite BACKEND_URL abaixo e faça um novo commit.
  */
 
-// ⚠️ ATENÇÃO: se você mudar o hostname do backend, atualize aqui e refaça o build/deploy.
-const BACKEND_URL_FALLBACK = "https://api.91-98-154-218.sslip.io";
+export const BACKEND_URL = "https://api.91-98-154-218.sslip.io";
 
-export const BACKEND_URL =
-  (process.env.REACT_APP_BACKEND_URL && process.env.REACT_APP_BACKEND_URL.trim()) ||
-  BACKEND_URL_FALLBACK;
-
-// Helper para montar endpoints (evita barras duplicadas).
+/** Monta um endpoint: api('/api/auth/login') -> 'https://.../api/auth/login' */
 export const api = (path) => {
   const base = BACKEND_URL.replace(/\/+$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
