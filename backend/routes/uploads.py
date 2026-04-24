@@ -35,13 +35,22 @@ from auth_utils import get_current_user
 
 router = APIRouter()
 
-MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 8 * 1024 * 1024))  # 8 MB
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 16 * 1024 * 1024))  # 16 MB
 ALLOWED_CT = {
+    # Imagens
     "image/png",
     "image/jpeg",
+    "image/jpg",
     "image/webp",
     "image/gif",
+    # PDFs
     "application/pdf",
+    # Videos (para documentar avaliação do profissional)
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
+    "video/3gpp",
+    "video/x-matroska",
 }
 
 

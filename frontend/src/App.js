@@ -30,15 +30,15 @@ function AppRoutes() {
         </ProtectedRoute>
       } />
       
-      <Route path="/dashboard/*" element={
-        <ProtectedRoute role="professional">
-          <ProDashboard />
-        </ProtectedRoute>
-      } />
-      
       <Route path="/dashboard/new-order" element={
         <ProtectedRoute role="professional">
           <NewOrder />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/dashboard/*" element={
+        <ProtectedRoute role="professional">
+          <ProDashboard />
         </ProtectedRoute>
       } />
     </Routes>
