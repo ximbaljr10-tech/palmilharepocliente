@@ -321,6 +321,13 @@ export const api = {
           shippingService: orderData.shipping_service,
           shippingFee: orderData.shipping_fee,
           packageDimensions: orderData.package_dimensions,
+          // 2026-04-24 FIX CÁLCULO FRETE: manda a caixa ideal retornada pela
+          // SuperFrete (option.ideal_package) + os produtos exatamente como
+          // foram enviados na cotação. O backend persiste em order_shipping_box
+          // para a etiqueta usar EXATAMENTE as mesmas dimensões.
+          idealPackage: orderData.ideal_package || null,
+          shippingQuoteProducts: orderData.shipping_quote_products || null,
+          shippingQuoteRaw: orderData.shipping_quote_raw || null,
         }),
       });
       const data = await res.json();
@@ -351,30 +358,49 @@ export const api = {
 
   // ============ SHIPPING (SuperFrete via Medusa backend) ============
   //
-  // AUDIT 2026-04-17: Ensures every product sent to the backend has:
-  //   - a numeric, positive quantity (>= 1)
-  //   - a numeric, positive weight/dimensions (falls back to a small default
-  //     only when absolutely nothing is available — never to a "free" parcel).
-  //
-  // The backend then re-sanitizes AGAIN (defense in depth) and forwards the
-  // parcel list to SuperFrete, which scales weight by quantity automatically.
+  // AUDIT 2026-04-24 (v2 — fix cálculo frete):
+  //   - Agora enviamos SEMPRE `products[]` (array de produtos individuais)
+  //     para o backend, nunca `package`. A SuperFrete calcula a caixa ideal.
+  //   - Lemos dimensões na ORDEM CORRETA:
+  //       1. metadata.width_cm / height_cm / length_cm / weight_kg (fonte real,
+  //          é onde o admin cadastra os valores)
+  //       2. campos normalizados (`height`, `width`, `length`, `weight`)
+  //       3. legado (`shipping_height`, etc.)
+  //       4. fallback seguro (12x12x19, 0.3kg)
+  //   - `cache: "no-store"` para garantir que o cálculo é sempre fresco.
+  //   - O backend retorna a `package` ideal calculada pela SuperFrete junto
+  //     com cada opção de serviço, para ser persistida no pedido.
   calculateShipping: async (cep: string, items: any[]) => {
     try {
       const products = items.map((item) => {
-        const shipping = item.shipping || item.metadata || {};
-        // Be robust: accept either the normalized (`height`) or the legacy
-        // metadata (`shipping_height`) naming, coerce to number, enforce min.
-        const num = (v: any, min: number, fallback: number) => {
-          const n = Number(v);
-          if (!Number.isFinite(n) || n <= 0) return fallback;
-          return Math.max(min, n);
+        const meta = item.metadata || {};
+        const shipping = item.shipping || {};
+        // Pick the first numeric, positive value from the candidates, else fallback
+        const pick = (candidates: any[], min: number, fallback: number) => {
+          for (const v of candidates) {
+            const n = Number(v);
+            if (Number.isFinite(n) && n > 0) return Math.max(min, n);
+          }
+          return fallback;
         };
         return {
           quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
-          height: num(shipping.shipping_height ?? shipping.height, 1, 12),
-          width:  num(shipping.shipping_width  ?? shipping.width,  1, 12),
-          length: num(shipping.shipping_length ?? shipping.length, 1, 19),
-          weight: num(shipping.shipping_weight ?? shipping.weight, 0.01, 0.3),
+          height: pick(
+            [meta.height_cm, shipping.shipping_height, shipping.height, item.height],
+            1, 12
+          ),
+          width: pick(
+            [meta.width_cm, shipping.shipping_width, shipping.width, item.width],
+            1, 12
+          ),
+          length: pick(
+            [meta.length_cm, shipping.shipping_length, shipping.length, item.length],
+            1, 19
+          ),
+          weight: pick(
+            [meta.weight_kg, shipping.shipping_weight, shipping.weight, item.weight],
+            0.01, 0.3
+          ),
         };
       });
 
@@ -387,9 +413,11 @@ export const api = {
 
       const res = await fetch(`${MEDUSA_URL}/store/shipping-quote`, {
         method: "POST",
+        cache: "no-store",
         headers: {
           "Content-Type": "application/json",
           "x-publishable-api-key": PUBLISHABLE_KEY,
+          "Cache-Control": "no-cache",
         },
         body: JSON.stringify({ cep, products }),
       });

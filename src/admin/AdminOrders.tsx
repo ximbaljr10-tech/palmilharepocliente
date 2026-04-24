@@ -1163,7 +1163,7 @@ export default function AdminOrders() {
       {/* Aparece no topo da tela, visível mesmo com overlay de remessas aberto. */}
       {labelsJobStatus && (
         <div
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[70] w-[calc(100%-1rem)] sm:w-auto sm:min-w-[380px] sm:max-w-[560px] pointer-events-none"
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[50] w-[calc(100%-1rem)] sm:w-auto sm:min-w-[380px] sm:max-w-[560px] pointer-events-none"
           role="status"
           aria-live="polite"
         >

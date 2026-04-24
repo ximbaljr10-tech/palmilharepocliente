@@ -37,13 +37,30 @@ export default function Cart() {
     try {
       const res = await api.calculateShipping(cleanCep, cartItems);
       if (res.success && res.options && Array.isArray(res.options)) {
+        // FIX 2026-04-24: Normalize ideal box to the shape backend expects:
+        //   { dimensions: { height, width, length }, weight, format }
+        // Prefer per-service packages[0], fall back to top-level ideal_package.
+        const topIdeal = res.ideal_package || null;
+        const normalizePkg = (raw: any) => {
+          if (!raw) return null;
+          const h = Number(raw.height) || null;
+          const w = Number(raw.width) || null;
+          const l = Number(raw.length) || null;
+          const kg = Number(raw.weight) || null;
+          if (!h && !w && !l && !kg) return null;
+          return {
+            dimensions: { height: h, width: w, length: l },
+            weight: kg,
+            format: raw.format || 'box',
+          };
+        };
         const options = res.options
           .map((opt: any) => ({
             id: opt.id,
             name: opt.name,
             price: parseFloat(opt.price),
             delivery_time: opt.delivery_time,
-            package: opt.packages?.[0] || null,
+            package: normalizePkg(opt.packages?.[0]) || normalizePkg(topIdeal),
           }))
           .filter((opt: any) => opt.price > 0);
 

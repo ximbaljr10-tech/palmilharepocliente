@@ -5,9 +5,9 @@ import {
   MessageCircle, Copy, Clock, BoxIcon, CheckCircle2, XCircle, Loader2,
   Archive, ArchiveRestore, AlertTriangle, Mail, Printer, RefreshCw, Wallet, Zap,
   StickyNote, Save, FileDown, Edit3, Search, ArrowRightLeft, ArrowRight, Info, ShieldAlert, History,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Plus, PlusCircle
 } from 'lucide-react';
-import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards, isLabelsV2Enabled, downloadOrderLabelPdf } from './adminApi';
+import { adminFetch, getStatusConfig, formatCurrency, isOrderArchived, archiveOrderBackend, unarchiveOrderBackend, saveOrderObservation, validateCPF, formatCPF, updateOrderCustomerData, canSwapItems, canAddItems, hasLabelGenerated, hasActiveLabelOrTracking, getSwapBlockedReason, searchProducts, mapAdminProduct, swapOrderItem, addOrderItem, resolveSwapAdjustment, getShippingByYards, extractYards, isLabelsV2Enabled, downloadOrderLabelPdf } from './adminApi';
 import TrackingCodeDisplay from '../components/TrackingCodeDisplay';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -54,6 +54,7 @@ const TL_ACTION_LABELS: Record<string, string> = {
   'archive': 'Arquivar',
   'unarchive': 'Desarquivar',
   'swap_item': 'Trocar Produto',
+  'add_item': 'Adicionar Produto',
   'resolve_swap_adjustment': 'Resolver Ajuste de Troca',
   'tracking_update': 'Atualizar Rastreio',
   'webhook_superfrete': 'Atualizacao SuperFrete',
@@ -212,6 +213,19 @@ export default function AdminOrderDetail() {
   const [swapExecuting, setSwapExecuting] = useState(false);
   const [swapResult, setSwapResult] = useState<{ success: boolean; message: string } | null>(null);
   const swapSearchTimeout = React.useRef<any>(null);
+
+  // Add-item state — mirrors the swap state. Uses the same backend
+  // mechanics (swap_adjustment overlay) so differences in UI are cosmetic.
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addSearch, setAddSearch] = useState('');
+  const [addSearchResults, setAddSearchResults] = useState<any[]>([]);
+  const [addSearching, setAddSearching] = useState(false);
+  const [addSelectedProduct, setAddSelectedProduct] = useState<any>(null);
+  const [addQuantity, setAddQuantity] = useState<number>(1);
+  const [addConfirming, setAddConfirming] = useState(false);
+  const [addExecuting, setAddExecuting] = useState(false);
+  const [addResult, setAddResult] = useState<{ success: boolean; message: string } | null>(null);
+  const addSearchTimeout = React.useRef<any>(null);
 
   // Customer data editing state
   const [editingCustomer, setEditingCustomer] = useState(false);
@@ -870,6 +884,107 @@ export default function AdminOrderDetail() {
     setSwapExecuting(false);
   };
 
+  // ============ ADD-ITEM HANDLERS ============
+  // These mirror the swap-* handlers exactly, but call addOrderItem() which
+  // hits the backend's add_item action (shares the same swap_adjustment state).
+  const openAddItemModal = () => {
+    setAddModalOpen(true);
+    setAddSearch('');
+    setAddSearchResults([]);
+    setAddSelectedProduct(null);
+    setAddQuantity(1);
+    setAddConfirming(false);
+    setAddResult(null);
+  };
+
+  const closeAddItemModal = () => {
+    setAddModalOpen(false);
+    setAddSearch('');
+    setAddSearchResults([]);
+    setAddSelectedProduct(null);
+    setAddQuantity(1);
+    setAddConfirming(false);
+    setAddResult(null);
+  };
+
+  const handleAddItemSearch = (query: string) => {
+    setAddSearch(query);
+    setAddSelectedProduct(null);
+    setAddConfirming(false);
+
+    if (addSearchTimeout.current) clearTimeout(addSearchTimeout.current);
+
+    if (query.trim().length < 2) {
+      setAddSearchResults([]);
+      setAddSearching(false);
+      return;
+    }
+
+    setAddSearching(true);
+    addSearchTimeout.current = setTimeout(async () => {
+      try {
+        const results = await searchProducts(query.trim());
+        const mapped = results.map(mapAdminProduct).filter(p => p.variant_id && p.status === 'published');
+        setAddSearchResults(mapped);
+      } catch (err) {
+        console.error('Add-item search error:', err);
+        setAddSearchResults([]);
+      } finally {
+        setAddSearching(false);
+      }
+    }, 500);
+  };
+
+  const selectAddProduct = (product: any) => {
+    setAddSelectedProduct(product);
+    setAddQuantity(1);
+    setAddConfirming(true);
+  };
+
+  const executeAddItem = async () => {
+    if (!order || !addSelectedProduct) return;
+
+    setAddExecuting(true);
+    setAddResult(null);
+
+    const qty = Math.max(1, Math.floor(Number(addQuantity) || 1));
+
+    const result = await addOrderItem({
+      orderId: order.id,
+      medusa_order_id: order.medusa_order_id,
+      new_product_id: addSelectedProduct.id,
+      new_variant_id: addSelectedProduct.variant_id,
+      new_product_title: addSelectedProduct.title,
+      new_product_price: addSelectedProduct.price, // already in reais
+      new_product_image: addSelectedProduct.image_url,
+      new_product_shipping: addSelectedProduct.shipping,
+      quantity: qty,
+    });
+
+    if (result.success) {
+      const add = result.add;
+      let diffMsg = 'Produto adicionado com sucesso!';
+      if (add?.diff) {
+        const totalDiff = Number(add.diff.total || 0);
+        if (totalDiff > 0) {
+          diffMsg += ` Diferenca a cobrar: +R$ ${formatCurrency(totalDiff)}`;
+        } else if (totalDiff < 0) {
+          diffMsg += ` Diferenca a devolver: -R$ ${formatCurrency(Math.abs(totalDiff))}`;
+        } else {
+          diffMsg += ' Sem diferenca no valor total.';
+        }
+      }
+      setAddResult({ success: true, message: diffMsg });
+      setTimeout(() => {
+        loadOrder().catch(() => {});
+        closeAddItemModal();
+      }, 2500);
+    } else {
+      setAddResult({ success: false, message: result.error || 'Erro ao adicionar produto' });
+    }
+    setAddExecuting(false);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -1304,6 +1419,39 @@ export default function AdminOrderDetail() {
             );
           })}
         </div>
+
+        {/* ===== ADD PRODUCT BUTTON ===== */}
+        {/* Same gate as swap: canAddItems delegates to canSwapItems.
+            Kept as a dedicated button so the UX for "adicionar" is explicit
+            and cannot be confused with "trocar" (per-item button). */}
+        {canAddItems(order) && (
+          <div className="pt-2">
+            <button
+              onClick={openAddItemModal}
+              className="w-full flex items-center justify-center gap-2 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 hover:border-emerald-300 rounded-xl py-2.5 font-semibold transition-colors"
+            >
+              <PlusCircle size={14} /> Adicionar produto ao pedido
+            </button>
+          </div>
+        )}
+        {!canAddItems(order) && ['awaiting_payment', 'paid'].includes(order.status) && hasLabelGenerated(order) && (
+          <div className="pt-2">
+            <div className="w-full flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 bg-zinc-50 border border-zinc-200 rounded-xl py-2">
+              <ShieldAlert size={11} /> {getSwapBlockedReason(order)} — adicao bloqueada
+            </div>
+          </div>
+        )}
+
+        {/* Add-item result banner (when modal is closed) */}
+        {addResult && !addModalOpen && (
+          <div className={`p-3 rounded-xl border flex items-start gap-2 ${
+            addResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'
+          }`}>
+            {addResult.success ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
+            <p className="flex-1 text-xs">{addResult.message}</p>
+          </div>
+        )}
+
         <div className="flex justify-between items-center pt-2 border-t border-zinc-100">
           <span className="text-xs text-zinc-500">Total dos itens</span>
           <span className="font-bold text-sm text-zinc-900">
@@ -1731,6 +1879,304 @@ export default function AdminOrderDetail() {
                     <button
                       onClick={() => { setSwapConfirming(false); setSwapSelectedProduct(null); setSwapResult(null); }}
                       disabled={swapExecuting}
+                      className="w-full text-zinc-500 py-2.5 rounded-xl text-sm font-medium hover:bg-zinc-50 border border-zinc-200 disabled:opacity-50 transition-colors"
+                    >
+                      Voltar para busca
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* ============ ADD PRODUCT MODAL (mirrors the swap modal UX) ============ */}
+      {addModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4" onClick={closeAddItemModal}>
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col border border-zinc-200" onClick={e => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 p-4 sm:p-5 border-b border-emerald-100 shrink-0">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-zinc-900 flex items-center gap-2 text-base">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <PlusCircle size={16} className="text-emerald-600" />
+                  </div>
+                  Adicionar Produto ao Pedido
+                </h3>
+                <button onClick={closeAddItemModal} className="w-8 h-8 rounded-lg bg-white/80 hover:bg-white flex items-center justify-center text-zinc-400 hover:text-zinc-600 transition-colors border border-zinc-200 text-lg leading-none">&times;</button>
+              </div>
+
+              {/* Order summary */}
+              <div className="bg-white rounded-xl p-3 border border-emerald-100 shadow-sm">
+                <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                  <Info size={10} /> Pedido atual
+                </p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <p className="text-[10px] text-zinc-400">Itens</p>
+                    <p className="font-semibold text-zinc-700">{order.items?.length || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-zinc-400">Frete</p>
+                    <p className="font-semibold text-zinc-700">R$ {fmtPrice(Number(order.shipping_fee || 0))}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-zinc-400">Total</p>
+                    <p className="font-semibold text-zinc-900">R$ {fmtPrice(Number(order.total_amount || 0))}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Search or Confirmation */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+              {!addConfirming ? (
+                <>
+                  {/* Search input */}
+                  <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={addSearch}
+                      onChange={(e) => handleAddItemSearch(e.target.value)}
+                      placeholder="Buscar produto a adicionar por nome..."
+                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 text-sm focus:ring-2 focus:ring-emerald-400 focus:border-emerald-300 outline-none bg-zinc-50 focus:bg-white transition-colors"
+                      autoFocus
+                    />
+                    {addSearching && (
+                      <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 animate-spin" />
+                    )}
+                  </div>
+
+                  {/* Search results */}
+                  {addSearch.length >= 2 && !addSearching && addSearchResults.length === 0 && (
+                    <div className="text-center py-6 space-y-2">
+                      <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center mx-auto">
+                        <Search size={20} className="text-zinc-300" />
+                      </div>
+                      <p className="text-sm text-zinc-500 font-medium">Nenhum produto encontrado</p>
+                      <p className="text-xs text-zinc-400">Tente buscar com outros termos para &ldquo;{addSearch}&rdquo;</p>
+                    </div>
+                  )}
+
+                  {addSearchResults.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-1">
+                        {addSearchResults.length} produto(s) encontrado(s)
+                      </p>
+                      <div className="space-y-1">
+                        {addSearchResults.map((product) => (
+                          <button
+                            key={product.id}
+                            onClick={() => selectAddProduct(product)}
+                            className="w-full text-left flex items-center gap-3 p-3 rounded-xl border bg-white border-zinc-100 hover:border-emerald-300 hover:bg-emerald-50/30 hover:shadow-sm active:scale-[0.99] transition-all"
+                          >
+                            {product.image_url ? (
+                              <img src={product.image_url} alt="" className="w-11 h-11 rounded-lg object-cover border border-zinc-200 shrink-0" />
+                            ) : (
+                              <div className="w-11 h-11 rounded-lg bg-zinc-100 flex items-center justify-center shrink-0">
+                                <Package size={16} className="text-zinc-300" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-zinc-900 line-clamp-1">{product.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-xs font-semibold text-zinc-700">R$ {fmtPrice(product.price)}</span>
+                                {product.stock !== undefined && product.stock !== null && (
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                    product.stock > 0 ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'
+                                  }`}>
+                                    {product.stock > 0 ? `${product.stock} em estoque` : 'Sem estoque'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+                              <Plus size={14} className="text-emerald-500" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {addSearch.length < 2 && (
+                    <div className="text-center py-8 space-y-2">
+                      <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto">
+                        <Search size={24} className="text-emerald-300" />
+                      </div>
+                      <p className="text-sm text-zinc-500 font-medium">Busque o produto a adicionar</p>
+                      <p className="text-xs text-zinc-400">Digite ao menos 2 caracteres para buscar</p>
+                    </div>
+                  )}
+                </>
+              ) : addSelectedProduct && (
+                /* ============ CONFIRMATION VIEW ============ */
+                <div className="space-y-4">
+                  {/* Add result message inside modal */}
+                  {addResult && (
+                    <div className={`p-3 rounded-xl border flex items-start gap-2 ${
+                      addResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'
+                    }`}>
+                      {addResult.success ? <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> : <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
+                      <p className="flex-1 text-xs font-medium">{addResult.message}</p>
+                    </div>
+                  )}
+
+                  {/* New product card */}
+                  <div className="bg-white rounded-xl p-3 border border-emerald-200 shadow-sm">
+                    <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                      <PlusCircle size={10} /> Produto a adicionar
+                    </p>
+                    <div className="flex items-center gap-3">
+                      {addSelectedProduct.image_url ? (
+                        <img src={addSelectedProduct.image_url} alt="" className="w-12 h-12 rounded-lg object-cover border border-emerald-200 shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+                          <Package size={16} className="text-emerald-300" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-zinc-900 line-clamp-2">{addSelectedProduct.title}</p>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          Preco unit.: R$ {fmtPrice(addSelectedProduct.price)}
+                          {addSelectedProduct.stock !== undefined && addSelectedProduct.stock !== null && (
+                            <span className={`ml-2 ${addSelectedProduct.stock > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                              &middot; {addSelectedProduct.stock > 0 ? `${addSelectedProduct.stock} em estoque` : 'Sem estoque'}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quantity picker */}
+                  <div className="bg-zinc-50 rounded-xl border border-zinc-200 p-3">
+                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Quantidade</p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setAddQuantity((q) => Math.max(1, (Number(q) || 1) - 1))}
+                        disabled={addExecuting || addQuantity <= 1}
+                        className="w-10 h-10 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-lg font-bold text-zinc-600 disabled:opacity-40"
+                      >&minus;</button>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={addQuantity}
+                        onChange={(e) => {
+                          const v = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                          setAddQuantity(v);
+                        }}
+                        className="flex-1 text-center py-2 rounded-lg border border-zinc-200 text-sm font-bold bg-white focus:ring-2 focus:ring-emerald-400 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAddQuantity((q) => (Number(q) || 1) + 1)}
+                        disabled={addExecuting}
+                        className="w-10 h-10 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-lg font-bold text-zinc-600 disabled:opacity-40"
+                      >+</button>
+                    </div>
+                  </div>
+
+                  {/* ===== DETAILED PRICE COMPARISON ===== */}
+                  {(() => {
+                    const unitPrice = Number(addSelectedProduct.price || 0);
+                    const qty = Math.max(1, Math.floor(Number(addQuantity) || 1));
+                    const addedTotal = unitPrice * qty;
+
+                    const currentSubtotal = order.items?.reduce((s: number, i: any) => s + Number(i.price || i.unit_price || 0) * i.quantity, 0) || 0;
+                    const currentShipping = Number(order.shipping_fee || 0);
+                    const isPaid = order.status === 'paid';
+
+                    const newSubtotal = currentSubtotal + addedTotal;
+                    const priceDiff = addedTotal;
+
+                    return (
+                      <div className="bg-zinc-50 rounded-xl border border-zinc-200 overflow-hidden">
+                        <div className="p-3 border-b border-zinc-200 bg-zinc-100/50">
+                          <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest flex items-center gap-1.5">
+                            <Info size={10} /> Resumo Financeiro
+                          </p>
+                        </div>
+                        <div className="p-3 space-y-2.5">
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Produto a adicionar ({qty}x)</span>
+                              <span className="text-zinc-700 font-semibold">+ R$ {fmtPrice(addedTotal)}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 pt-2 border-t border-zinc-200">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Subtotal atual (itens)</span>
+                              <span className="text-zinc-600">R$ {fmtPrice(currentSubtotal)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                              <span className="text-zinc-500">Subtotal novo (itens)</span>
+                              <span className="text-zinc-700 font-semibold">R$ {fmtPrice(newSubtotal)}</span>
+                            </div>
+                            <div className="flex justify-between text-xs pt-1.5 border-t border-zinc-200">
+                              <span className="text-zinc-700 font-semibold">Diferenca (itens)</span>
+                              <span className="text-red-600 font-bold">+R$ {fmtPrice(priceDiff)}</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-amber-50/80 border border-amber-100 rounded-lg p-2.5 mt-1">
+                            <div className="flex items-start gap-2">
+                              <Truck size={12} className="text-amber-600 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-[10px] text-amber-700 font-semibold">Frete sera recalculado</p>
+                                <p className="text-[10px] text-amber-600 mt-0.5">
+                                  Frete atual: R$ {formatCurrency(currentShipping)} &middot; O novo frete sera calculado via SuperFrete somando o peso/dimensao do novo produto.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {isPaid && (
+                            <div className="rounded-lg p-2.5 border bg-red-50 border-red-200">
+                              <div className="flex items-start gap-2">
+                                <CreditCard size={12} className="shrink-0 mt-0.5 text-red-500" />
+                                <div>
+                                  <p className="text-[10px] font-bold text-red-700">Cobrar diferenca do cliente</p>
+                                  <p className="text-[10px] mt-0.5 text-red-600">
+                                    Diferenca estimada nos produtos: R$ {fmtPrice(priceDiff)}. O frete pode alterar o valor final.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3 text-xs text-zinc-600">
+                    <p className="font-bold flex items-center gap-1 mb-1.5 text-zinc-700"><AlertTriangle size={12} className="text-amber-500" /> O que vai acontecer:</p>
+                    <ul className="space-y-0.5 ml-0.5 text-zinc-500">
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O novo produto sera adicionado ao pedido existente (pedido nao e duplicado)</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O frete sera recalculado via SuperFrete</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> O total do pedido sera atualizado</li>
+                      <li className="flex items-start gap-1.5"><span className="text-zinc-300 mt-px">&#8226;</span> A adicao sera registrada no ajuste pendente (historico preservado)</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex flex-col gap-2 pt-1">
+                    <button
+                      onClick={executeAddItem}
+                      disabled={addExecuting || !!addResult?.success}
+                      className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors shadow-sm active:scale-[0.98]"
+                    >
+                      {addExecuting ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
+                      {addExecuting ? 'Processando adicao...' : 'Confirmar Adicao de Produto'}
+                    </button>
+                    <button
+                      onClick={() => { setAddConfirming(false); setAddSelectedProduct(null); setAddResult(null); }}
+                      disabled={addExecuting}
                       className="w-full text-zinc-500 py-2.5 rounded-xl text-sm font-medium hover:bg-zinc-50 border border-zinc-200 disabled:opacity-50 transition-colors"
                     >
                       Voltar para busca

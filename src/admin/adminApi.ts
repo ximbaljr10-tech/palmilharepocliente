@@ -542,6 +542,52 @@ export async function swapOrderItem(payload: SwapItemPayload): Promise<{
   }
 }
 
+// ============ ADD ITEM (Add a new product to an existing order) ============
+// Reuses the SAME business rules as swap_item on the backend:
+//   - Only allowed in status 'awaiting_payment' or 'paid'
+//   - Blocked when an active SuperFrete label or tracking exists
+//   - Creates/updates the same swap_adjustment (pending) metadata overlay
+//   - Recalculates shipping via SuperFrete from scratch
+// The only functional difference from swap is: instead of replacing an item
+// at a given index, the new product is APPENDED to the order.
+export interface AddItemPayload {
+  orderId: number;
+  medusa_order_id: string;
+  new_product_id: string;
+  new_variant_id: string;
+  new_product_title: string;
+  new_product_price: number; // in REAIS
+  new_product_image: string;
+  new_product_shipping: {
+    height: number;
+    width: number;
+    length: number;
+    weight: number;
+  };
+  quantity: number;
+}
+
+export async function addOrderItem(payload: AddItemPayload): Promise<{
+  success: boolean;
+  error?: string;
+  add?: any;
+  order?: any;
+}> {
+  try {
+    const result = await adminFetch('/admin/pedidos', {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...payload,
+        action: 'add_item',
+      }),
+    });
+    return result;
+  } catch (err: any) {
+    console.error('Erro ao adicionar produto:', err);
+    return { success: false, error: err.message };
+  }
+}
+
 // Resolve (consolidate) a pending swap adjustment
 export async function resolveSwapAdjustment(orderId: number, medusa_order_id: string): Promise<{
   success: boolean;
@@ -582,6 +628,14 @@ export function canSwapItems(order: any): boolean {
   if (hasActiveLabelOrTracking(order)) return false;
   
   return true;
+}
+
+// Check if order allows ADDING NEW ITEMS.
+// Uses the SAME criteria as canSwapItems — the backend applies identical
+// validations for the add_item action (status + no active label/tracking).
+// Keep this as a thin alias so any future divergence is explicit.
+export function canAddItems(order: any): boolean {
+  return canSwapItems(order);
 }
 
 // Check if order has an ACTIVE shipping label or tracking code.
