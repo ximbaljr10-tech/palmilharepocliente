@@ -1,5 +1,5 @@
 // ============================================================================
-// ProductEditor - Orquestra as abas do editor full-screen
+// ProductEditor - Orquestra a view de edição (One Page, sem abas)
 // ============================================================================
 
 import React, { useMemo, useState } from 'react';
@@ -8,11 +8,10 @@ import {
   AlertTriangle, X,
 } from 'lucide-react';
 import { SKIP_COLOR_YARDS } from '../../../../types';
-import type { ColorItem, EditorTab, ParsedProduct } from '../../types';
+import type { ColorItem, ParsedProduct } from '../../types';
 import { StatusDot } from '../../components/StatusDot';
 import { RankPill } from '../../components/RankPill';
 import { centsToReais, reaisToCents } from '../../components/CurrencyInput';
-import { EditorTabs } from './EditorTabs';
 import { TabInfo } from './TabInfo';
 import { TabImages } from './TabImages';
 import { TabColors } from './TabColors';
@@ -47,16 +46,10 @@ export function ProductEditor({
 }) {
   const isNew = !product;
 
-  const [tab, setTab] = useState<EditorTab>('info');
-
   const [title, setTitle] = useState(product?.title || '');
   const [handle, setHandle] = useState(product?.handle || '');
   const [description, setDescription] = useState(product?.description || '');
   const [status, setStatus] = useState(product?.status || 'draft');
-  // Preço agora é mantido internamente em CENTAVOS (inteiro).
-  // Evita qualquer ambiguidade entre "43,90" vs "4390". O componente
-  // CurrencyInput formata pra R$ em tempo real. Ao salvar, convertemos
-  // cents → reais (como a API espera).
   const [priceCents, setPriceCents] = useState<number | null>(
     product ? reaisToCents(product._price) : null
   );
@@ -91,14 +84,6 @@ export function ProductEditor({
     return !SKIP_COLOR_YARDS.includes(currentYards);
   }, [product, needsColorFromProduct, currentYards]);
 
-  const tabErrors = useMemo((): Partial<Record<EditorTab, boolean>> => {
-    const out: Partial<Record<EditorTab, boolean>> = {};
-    if (!title.trim()) out.info = true;
-    if (priceCents === null || priceCents <= 0) out.info = true;
-    if (rank.trim() !== '' && (isNaN(Number(rank)) || Number(rank) < 0)) out.rank = true;
-    return out;
-  }, [title, priceCents, rank]);
-
   const autoHandle = (t: string) => {
     if (isNew || !product?.handle) {
       setHandle(
@@ -122,15 +107,11 @@ export function ProductEditor({
     }
     if (errs.length > 0) {
       setErrors(errs);
-      if (!title.trim() || priceCents === null || priceCents <= 0) setTab('info');
-      else if (rank.trim() !== '') setTab('rank');
       return;
     }
 
     const finalGroup = showNewGroup && newGroupName.trim() ? newGroupName.trim() : grupo;
 
-    // Converte centavos -> reais (forma canônica do backend) ANTES de salvar.
-    // Ex: priceCents=4390 → priceReais=43.90
     const priceReais = centsToReais(priceCents);
 
     onSave({
@@ -184,8 +165,6 @@ export function ProductEditor({
         </button>
       </div>
 
-      <EditorTabs current={tab} onChange={setTab} errors={tabErrors} />
-
       {!isNew && status === 'draft' && (
         <div className="bg-amber-50 border-b border-amber-200 px-3 py-2 text-[11px] text-amber-900 flex items-center gap-2 shrink-0">
           <Flag size={12} className="shrink-0" />
@@ -210,8 +189,10 @@ export function ProductEditor({
       )}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="max-w-2xl mx-auto px-3 py-4 pb-28 space-y-3">
-          {tab === 'info' && (
+        <div className="max-w-2xl mx-auto px-3 py-6 pb-28 space-y-8">
+          
+          <section>
+            <h3 className="text-lg font-bold text-zinc-900 mb-4">Informações Básicas</h3>
             <TabInfo
               title={title} setTitle={setTitle}
               handle={handle} setHandle={setHandle}
@@ -224,8 +205,12 @@ export function ProductEditor({
               newGroupName={newGroupName} setNewGroupName={setNewGroupName}
               autoHandle={autoHandle}
             />
-          )}
-          {tab === 'images' && (
+          </section>
+
+          <hr className="border-zinc-200" />
+
+          <section>
+            <h3 className="text-lg font-bold text-zinc-900 mb-4">Imagens</h3>
             <TabImages
               images={images}
               setImages={setImages}
@@ -233,22 +218,30 @@ export function ProductEditor({
               setUploading={setUploadingImage}
               setErrors={setErrors}
             />
+          </section>
+
+          {showColorSection && (
+            <>
+              <hr className="border-zinc-200" />
+              <section>
+                <h3 className="text-lg font-bold text-zinc-900 mb-4">Cores Disponíveis</h3>
+                <TabColors
+                  product={product}
+                  colors={colors}
+                  setColors={setColors}
+                  colorChanged={colorChanged}
+                  setColorChanged={setColorChanged}
+                  currentYards={currentYards}
+                  showColorSection={showColorSection}
+                />
+              </section>
+            </>
           )}
-          {tab === 'colors' && (
-            <TabColors
-              product={product}
-              colors={colors}
-              setColors={setColors}
-              colorChanged={colorChanged}
-              setColorChanged={setColorChanged}
-              currentYards={currentYards}
-              showColorSection={showColorSection}
-            />
-          )}
-          {tab === 'rank' && (
-            <TabRank rank={rank} setRank={setRank} />
-          )}
-          {tab === 'shipping' && (
+
+          <hr className="border-zinc-200" />
+
+          <section>
+            <h3 className="text-lg font-bold text-zinc-900 mb-4">Frete e Dimensões</h3>
             <TabShipping
               title={title}
               shHeight={shHeight} setShHeight={setShHeight}
@@ -256,7 +249,15 @@ export function ProductEditor({
               shLength={shLength} setShLength={setShLength}
               shWeight={shWeight} setShWeight={setShWeight}
             />
-          )}
+          </section>
+
+          <hr className="border-zinc-200" />
+
+          <section>
+            <h3 className="text-lg font-bold text-zinc-900 mb-4">Organização</h3>
+            <TabRank rank={rank} setRank={setRank} />
+          </section>
+
         </div>
       </div>
 

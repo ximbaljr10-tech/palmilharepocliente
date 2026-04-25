@@ -56,6 +56,10 @@ export function useProductSave({ showToast, reload }: SaveDeps) {
               price: data.price,
               images: data.images,
               metadata: metadataPayload,
+              weight: data.shipping_weight,
+              length: data.shipping_length,
+              height: data.shipping_height,
+              width: data.shipping_width,
             }),
           });
           if (!result.success && !result.product) {
@@ -89,6 +93,10 @@ export function useProductSave({ showToast, reload }: SaveDeps) {
           description: data.description,
           status: data.status,
           metadata: metadataUpdate,
+          weight: data.shipping_weight,
+          length: data.shipping_length,
+          height: data.shipping_height,
+          width: data.shipping_width,
         };
 
         // Preço: só enviamos se mudou, e comparamos SEMPRE em centavos inteiros
