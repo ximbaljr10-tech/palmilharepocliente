@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import React from 'react';
 import { ShoppingCart, Package, X } from 'lucide-react';
 import { CartProvider, useCart } from './CartContext';
@@ -20,7 +20,14 @@ import StoreLanding from './pages/StoreLanding'; // Nova pagina de teste UX (rot
 import YardCatalog from './pages/YardCatalog'; // Catalogo filtrado por jarda (rota: /store/jardas/:yard)
 import YardSelection from './pages/YardSelection'; // Escolha de jarda (rota: /store/nova-home/jardas)
 import CategoryCatalog from './pages/CategoryCatalog'; // Catálogo por categoria (rota: /store/nova-home/:category)
-import ComingSoon from './pages/ComingSoon'; // Página de manutenção (em manutenção: / e /store/*)
+import ComingSoon from './pages/ComingSoon'; // (DESATIVADO 2026-04-25 v3) — mantido como import para fallback de emergência
+
+// Helper: redireciona / para /store (a verdadeira homepage)
+function RedirectToStore() {
+  return <Navigate to="/store" replace />;
+}
+// (suprime warning de import não utilizado — ComingSoon fica disponível caso precise voltar a manutencao)
+void ComingSoon;
 import Footer from './components/Footer';
 
 // New admin imports
@@ -258,11 +265,12 @@ function StoreLayout() {
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 flex-grow w-full">
         <Routes>
           {/* =============================================
-              MODO MANUTENCAO PARCIAL (2026-04-25 v2)
-              Unica rota bloqueada aqui: /store (index puro)
-              Todo o resto esta liberado para teste.
+              SITE 100% NO AR (2026-04-25 v3)
+              Manutencao desativada. /store (index) volta a
+              ser a homepage real (StoreLanding) com banner,
+              linhas profissionais, mais vendidos, etc.
               ============================================= */}
-          <Route index element={<ComingSoon />} />
+          <Route index element={<StoreLanding />} />
           {/* Catalogo completo */}
           <Route path="catalogo" element={<Home />} />
           <Route path="product/:id" element={<ProductDetail />} />
@@ -283,8 +291,8 @@ function StoreLayout() {
           <Route path="frete-entrega" element={<FreteEntrega />} />
           <Route path="blog" element={<BlogList />} />
           <Route path="blog/:slug" element={<BlogPost />} />
-          {/* Qualquer outra sub-rota desconhecida */}
-          <Route path="*" element={<ComingSoon />} />
+          {/* Sub-rotas desconhecidas voltam para a home */}
+          <Route path="*" element={<StoreLanding />} />
         </Routes>
       </main>
       <Footer />
@@ -298,12 +306,10 @@ export default function App() {
       <Router>
         <Routes>
           {/* =============================================
-              MODO MANUTENCAO PARCIAL (2026-04-25 v2)
-              APENAS duas rotas bloqueadas:
-                - "/" (raiz)
-                - "/store" (index puro)
-              TUDO o resto liberado: catalogo, product, cart,
-              checkout, blog, sobre, contato, etc.
+              SITE 100% NO AR (2026-04-25 v3)
+              ComingSoon DESATIVADO. "/" e "/store" servem
+              a homepage real (StoreLanding) com banner,
+              linhas profissionais, mais vendidos, etc.
               Admin continua funcionando normalmente.
               ============================================= */}
 
@@ -319,16 +325,14 @@ export default function App() {
             <Route path="historico" element={<AdminAuditoria />} />
           </Route>
 
-          {/* StoreLayout gerencia internamente quais sub-rotas estao liberadas.
-              /store (index) → ComingSoon
-              /store/catalogo, /store/cart, etc. → Liberados */}
+          {/* StoreLayout: /store/* (homepage + sub-rotas todas liberadas) */}
           <Route path="/store/*" element={<StoreLayout />} />
 
-          {/* Página de manutenção: cobre "/" e qualquer rota desconhecida */}
-          <Route path="/" element={<ComingSoon />} />
+          {/* Raiz redireciona para /store (homepage real) */}
+          <Route path="/" element={<RedirectToStore />} />
 
-          {/* Fallback de segurança */}
-          <Route path="*" element={<ComingSoon />} />
+          {/* Fallback de seguranca: qualquer rota desconhecida vai pra home */}
+          <Route path="*" element={<RedirectToStore />} />
         </Routes>
       </Router>
     </CartProvider>

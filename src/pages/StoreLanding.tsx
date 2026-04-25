@@ -271,12 +271,7 @@ export default function StoreLanding() {
           className="w-full rounded-2xl shadow-xl border border-zinc-100" loading="eager" />
       </div>
 
-      {/* 2. Anúncio pós-banner */}
-      <div className="w-[99%] md:w-[80%] mx-auto">
-        <AdSenseBanner />
-      </div>
-
-      {/* 3. Escolha rápida — banners INALTERADOS visualmente */}
+      {/* 2. Tres linhas profissionais (logo abaixo do banner) — banners INALTERADOS visualmente */}
       <div className="px-2 sm:px-0">
         <div className="text-center mb-8">
           <h2 className="text-xl sm:text-2xl font-black text-zinc-900 uppercase tracking-tight">
@@ -310,29 +305,42 @@ export default function StoreLanding() {
           ))}
 
           <Link to="/store/catalogo"
-            className="flex items-center justify-center gap-2 w-full py-4 mt-2 rounded-2xl border-2 border-zinc-200 text-zinc-400 font-bold text-xs uppercase tracking-[0.2em] transition-all duration-300 hover:border-zinc-900 hover:text-zinc-900 active:scale-[0.98]">
-            Explorar catálogo completo <ArrowRight size={15} />
+            className="flex items-center justify-center gap-2 w-full py-4 mt-2 rounded-2xl border-2 border-zinc-900 text-zinc-900 font-black text-xs uppercase tracking-[0.2em] transition-all duration-300 hover:bg-zinc-900 hover:text-white active:scale-[0.98]">
+            Ver Todos os Produtos <ArrowRight size={15} />
           </Link>
         </div>
       </div>
 
-      {/* 4. Mais vendidos */}
-      <div>
-        <div className="flex items-center gap-3 mb-5 px-1 sm:px-0">
-          <div className="w-1 h-6 bg-red-600 rounded-full" />
-          <h2 className="text-xl sm:text-2xl font-black tracking-tight text-zinc-900 uppercase">Mais Vendidos</h2>
+      {/* 3. Top 3 (destaque dedicado para o pódio) */}
+      {bestSellers.length >= 1 && (
+        <div>
+          <div className="flex items-center gap-3 mb-5 px-1 sm:px-0">
+            <div className="w-1 h-6 bg-red-600 rounded-full" />
+            <h2 className="text-xl sm:text-2xl font-black tracking-tight text-zinc-900 uppercase">Top 3</h2>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Mais procurados</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+            {bestSellers.slice(0, 3).map((p, i) => (
+              <ProductCard key={p.id} product={p} rank={i + 1} />
+            ))}
+          </div>
         </div>
-        {bestSellers.length === 0
-          ? <div className="text-center py-12 text-zinc-500 bg-white rounded-xl border border-zinc-100">Nenhum produto encontrado.</div>
-          : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-              {bestSellers.map((p, i) => (
-                <ProductCard key={p.id} product={p} rank={i < 3 ? i + 1 : undefined} isTrending={i >= 3 && i < 6} />
-              ))}
-            </div>
-          )
-        }
-      </div>
+      )}
+
+      {/* 4. Mais Vendidos (restante) */}
+      {bestSellers.length > 3 && (
+        <div>
+          <div className="flex items-center gap-3 mb-5 px-1 sm:px-0">
+            <div className="w-1 h-6 bg-red-600 rounded-full" />
+            <h2 className="text-xl sm:text-2xl font-black tracking-tight text-zinc-900 uppercase">Mais Vendidos</h2>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+            {bestSellers.slice(3).map((p, i) => (
+              <ProductCard key={p.id} product={p} isTrending={i < 3} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 5. Anúncio entre seções */}
       <AdSenseBanner />

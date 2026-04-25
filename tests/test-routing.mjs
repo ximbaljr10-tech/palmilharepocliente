@@ -1,12 +1,16 @@
 // ============================================================================
-// TESTE DE ROTAS - Verificar Coming Soon parcial
-// 2026-04-25 - Rotas liberadas: /store/catalogo, /store/cart, /store/checkout, /store/product/:id
-// Rotas bloqueadas: / e /store (puro)
+// TESTE DE ROTAS - Site 100% no ar (2026-04-25 v3)
+// ----------------------------------------------------------------------------
+// ComingSoon foi DESATIVADO. Tudo aponta para a homepage real (StoreLanding).
+//   - "/"        → RedirectToStore (Navigate to="/store")
+//   - "/store"   → StoreLanding (homepage real)
+//   - "/store/*" → StoreLayout (catalogo, cart, checkout, blog, etc.)
+//   - "*"        → RedirectToStore (qualquer rota desconhecida vai pra home)
+// Admin "/store/admin/*" continua intacto.
 // ============================================================================
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,12 +22,12 @@ const assert = (cond, label) => {
   else       { failed++; console.error(`  FAIL  ${label}`); }
 };
 
-console.log('\n=== TESTE: Rotas publicas ===');
+console.log('\n=== TESTE: Rotas publicas (site no ar) ===');
 
-// Raiz deve ir para ComingSoon
+// Raiz deve redirecionar para /store (RedirectToStore = Navigate)
 assert(
-  /path="\/"\s+element=\{<ComingSoon\s*\/>/.test(APP),
-  '/ → ComingSoon (bloqueado)'
+  /path="\/"\s+element=\{<RedirectToStore\s*\/>/.test(APP),
+  '/ → RedirectToStore (site no ar, redireciona pra home)'
 );
 
 // /store/* → StoreLayout
@@ -32,42 +36,50 @@ assert(
   '/store/* → StoreLayout (gerencia subrotas)'
 );
 
-// Fallback /* → ComingSoon
+// Fallback /* → RedirectToStore
 assert(
-  /path="\*"\s+element=\{<ComingSoon\s*\/>/.test(APP),
-  'rotas desconhecidas → ComingSoon'
+  /path="\*"\s+element=\{<RedirectToStore\s*\/>/.test(APP),
+  'rotas desconhecidas → RedirectToStore (volta pra home)'
 );
 
-// StoreLayout: index deve ser ComingSoon (bloqueia /store puro)
+// Helper RedirectToStore precisa existir e usar <Navigate>
+assert(
+  /function\s+RedirectToStore\s*\([^)]*\)\s*\{[\s\S]*?<Navigate\s+to="\/store"\s+replace\s*\/>/.test(APP),
+  'RedirectToStore implementado com <Navigate to="/store" replace />'
+);
+
+// StoreLayout: index deve ser StoreLanding (homepage real)
 const STORE_LAYOUT_BLOCK = APP.match(/function StoreLayout\(\)[\s\S]*?<\/div>\s*\);\s*\}/);
 assert(STORE_LAYOUT_BLOCK !== null, 'StoreLayout encontrado no App.tsx');
+
 if (STORE_LAYOUT_BLOCK) {
   const layoutCode = STORE_LAYOUT_BLOCK[0];
-  // index dentro do StoreLayout deve apontar para ComingSoon
+
+  // index dentro do StoreLayout = StoreLanding (homepage real)
   assert(
-    /<Route\s+index\s+element=\{<ComingSoon/.test(layoutCode),
-    '/store (index) → ComingSoon (mantem bloqueio do /store puro)'
+    /<Route\s+index\s+element=\{<StoreLanding/.test(layoutCode),
+    '/store (index) → StoreLanding (homepage real, ComingSoon desativado)'
   );
 
-  // Rotas LIBERADAS que devem existir:
+  // Rotas LIBERADAS:
   assert(
     /path="catalogo"\s+element=\{<Home/.test(layoutCode),
-    '/store/catalogo → Home (LIBERADO para teste)'
+    '/store/catalogo → Home'
   );
   assert(
     /path="product\/:id"\s+element=\{<ProductDetail/.test(layoutCode),
-    '/store/product/:id → ProductDetail (LIBERADO)'
+    '/store/product/:id → ProductDetail'
   );
   assert(
     /path="cart"\s+element=\{<Cart/.test(layoutCode),
-    '/store/cart → Cart (LIBERADO)'
+    '/store/cart → Cart'
   );
   assert(
     /path="checkout"\s+element=\{<Checkout/.test(layoutCode),
-    '/store/checkout → Checkout (LIBERADO)'
+    '/store/checkout → Checkout'
   );
 
-  // 2026-04-25 v2: Rotas institucionais agora LIBERADAS (apenas / e /store bloqueados)
+  // Rotas institucionais
   const liberatedPatterns = [
     { path: 'sobre', comp: 'Sobre' },
     { path: 'contato', comp: 'Contato' },
@@ -77,15 +89,21 @@ if (STORE_LAYOUT_BLOCK) {
   ];
   for (const { path, comp } of liberatedPatterns) {
     const rx = new RegExp(`path="${path}"\\s+element=\\{<${comp}`);
-    assert(rx.test(layoutCode), `/store/${path} → ${comp} (LIBERADO)`);
+    assert(rx.test(layoutCode), `/store/${path} → ${comp}`);
   }
 
-  // Admin continua funcionando
+  // Subroutas desconhecidas dentro de /store/* voltam para StoreLanding
   assert(
-    /path="\/store\/admin"\s+element=\{<AdminLayout/.test(APP),
-    'Admin /store/admin continua acessivel (com rotas filhas)'
+    /<Route\s+path="\*"\s+element=\{<StoreLanding/.test(layoutCode),
+    '/store/(desconhecida) → StoreLanding (sem ComingSoon)'
   );
 }
+
+// Admin continua funcionando
+assert(
+  /path="\/store\/admin"\s+element=\{<AdminLayout/.test(APP),
+  'Admin /store/admin continua acessivel (com rotas filhas)'
+);
 
 console.log(`\n=== RESUMO ===\nPassou: ${passed}\nFalhou: ${failed}\n`);
 process.exit(failed > 0 ? 1 : 0);

@@ -35,12 +35,14 @@ export function HomeDashboard({
 }: HomeDashboardProps) {
   return (
     <div className="space-y-3 pb-10">
-      {/* Stats rapidas */}
-      <div className="grid grid-cols-4 gap-1.5">
+      {/* Stats rapidas — 2026-04-25 v3: removido "Rank".
+          Rank so importa para o dono decidir quem fica no topo, e isso
+          ja vive dentro da area de Ajustar Ranking. Nao precisa poluir
+          o dashboard inicial com isso. */}
+      <div className="grid grid-cols-3 gap-1.5">
         <StatTile label="Total" value={stats.total} tone="zinc" />
-        <StatTile label="Pub" value={stats.published} tone="emerald" />
-        <StatTile label="Rasc" value={stats.draft} tone="amber" />
-        <StatTile label="Rank" value={stats.withRank} tone="blue" />
+        <StatTile label="Publicados" value={stats.published} tone="emerald" />
+        <StatTile label="Rascunhos" value={stats.draft} tone="amber" />
       </div>
 
       {loading && (
