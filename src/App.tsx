@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import React from 'react';
 import { ShoppingCart, Package, X } from 'lucide-react';
 import { CartProvider, useCart } from './CartContext';
@@ -20,6 +20,7 @@ import StoreLanding from './pages/StoreLanding'; // Nova pagina de teste UX (rot
 import YardCatalog from './pages/YardCatalog'; // Catalogo filtrado por jarda (rota: /store/jardas/:yard)
 import YardSelection from './pages/YardSelection'; // Escolha de jarda (rota: /store/nova-home/jardas)
 import CategoryCatalog from './pages/CategoryCatalog'; // Catálogo por categoria (rota: /store/nova-home/:category)
+import ComingSoon from './pages/ComingSoon'; // Página de manutenção (em manutenção: / e /store/*)
 import Footer from './components/Footer';
 
 // New admin imports
@@ -294,9 +295,13 @@ export default function App() {
     <CartProvider>
       <Router>
         <Routes>
-          {/* Root redirects to store */}
-          <Route path="/" element={<Navigate to="/store" replace />} />
-          
+          {/* =============================================
+              MODO MANUTENÇÃO
+              - "/" e "/store/*" → ComingSoon
+              - "/store/admin/*" CONTINUA FUNCIONANDO normalmente
+                (admin precisa operar pedidos mesmo com o site fora).
+              ============================================= */}
+
           {/* Admin routes under /store/admin - MUST be before /store/* */}
           <Route path="/store/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
@@ -309,8 +314,13 @@ export default function App() {
             <Route path="historico" element={<AdminAuditoria />} />
           </Route>
 
-          {/* Store routes - all under /store */}
-          <Route path="/store/*" element={<StoreLayout />} />
+          {/* Página de manutenção: cobre "/", "/store" e "/store/qualquer-coisa" */}
+          <Route path="/" element={<ComingSoon />} />
+          <Route path="/store" element={<ComingSoon />} />
+          <Route path="/store/*" element={<ComingSoon />} />
+
+          {/* Fallback de segurança: qualquer rota desconhecida também cai na manutenção */}
+          <Route path="*" element={<ComingSoon />} />
         </Routes>
       </Router>
     </CartProvider>
