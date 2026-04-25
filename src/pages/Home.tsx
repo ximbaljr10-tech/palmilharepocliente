@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Product } from '../types';
-import { needsColorSelection } from '../types';
+import { needsColorSelection, isProductAvailable } from '../types';
 import { useCart } from '../CartContext';
 import { api } from '../api';
 import { Search, Filter, Loader2, Pointer, BookOpen } from 'lucide-react';
@@ -28,8 +28,10 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const [showCheck, setShowCheck] = useState(false);
 
   const requiresColor = needsColorSelection(product);
+  const inStock = isProductAvailable(product);
 
   const handleBuy = () => {
+    if (!inStock) return;
     // If product needs color selection, redirect to product page
     if (requiresColor) {
       navigate(`/store/product/${product.id}`);
@@ -54,13 +56,19 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           <img
             src={product.image_url}
             alt={product.title}
-            className="w-full h-full object-cover"
+            className={`w-full h-full object-cover ${!inStock ? 'opacity-50 grayscale' : ''}`}
             referrerPolicy="no-referrer"
             loading="lazy"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-zinc-400">
             Sem imagem
+          </div>
+        )}
+        {/* Badge esgotado (2026-04-25 FRENTE 2) */}
+        {!inStock && (
+          <div className="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow">
+            ESGOTADO
           </div>
         )}
         {/* Cart animation overlay */}
@@ -88,14 +96,16 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           </span>
           <button
             onClick={handleBuy}
-            disabled={isAdding}
+            disabled={isAdding || !inStock}
             className={`px-3 py-2 sm:px-4 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition-all duration-300 w-full sm:w-auto flex items-center justify-center gap-2 ${
-              isAdding 
-                ? 'bg-emerald-600 text-white scale-95' 
+              !inStock
+                ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                : isAdding
+                ? 'bg-emerald-600 text-white scale-95'
                 : 'bg-zinc-900 text-white hover:bg-zinc-800 active:scale-95'
             }`}
           >
-            {showCheck ? (
+            {!inStock ? 'Esgotado' : showCheck ? (
               <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> Adicionado!</>
             ) : isAdding ? (
               <Loader2 size={16} className="animate-spin" />

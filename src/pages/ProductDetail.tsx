@@ -7,10 +7,10 @@
  *  - AdSense slot 2946092108 após trust badges (posição estratégica / política-compliant)
  *  - Layout mais refinado: menos peso, mais espaço
  */
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
-import { Product, ColorPreference, needsColorSelection, getColorsForProduct, getColorGroupName } from '../types';
+import { Product, ColorPreference, needsColorSelection, getColorsForProduct, getColorGroupName, isProductAvailable, maxCartQuantity } from '../types';
 import { useCart } from '../CartContext';
 import { api } from '../api';
 import { ArrowLeft, ShieldCheck, Truck, CreditCard, Minus, Plus, Loader2, ShoppingCart } from 'lucide-react';
@@ -19,6 +19,61 @@ import Breadcrumbs from '../components/Breadcrumbs';
 /* ─── AdSense — slot exclusivo da página de produto ─
  * 2026-04-17: libertado do container com overflow-hidden/min-h fixa.
  */
+/**
+ * ProductGallery — galeria com imagem principal + thumbnails (FRENTE 3 / 2026-04-25).
+ * Mostra a primeira imagem como principal, e as demais como thumbs clicaveis.
+ * Se product.images nao existe, usa apenas product.image_url (compat com dados antigos).
+ */
+function ProductGallery({ product }: { product: Product }) {
+  const allImages = React.useMemo(() => {
+    const list: string[] = [];
+    if (product.images && product.images.length > 0) {
+      for (const u of product.images) {
+        if (typeof u === 'string' && u && !list.includes(u)) list.push(u);
+      }
+    }
+    if (product.image_url && !list.includes(product.image_url)) {
+      list.unshift(product.image_url);
+    }
+    return list;
+  }, [product.images, product.image_url]);
+
+  const [activeIdx, setActiveIdx] = useState(0);
+  useEffect(() => { setActiveIdx(0); }, [product.id]);
+
+  const active = allImages[activeIdx] || product.image_url || '';
+  const hasMultiple = allImages.length > 1;
+
+  return (
+    <div className="space-y-3">
+      <div className="aspect-square bg-zinc-50 rounded-xl overflow-hidden border border-zinc-100">
+        {active
+          ? <img src={active} alt={product.title} className="w-full h-full object-contain p-4" referrerPolicy="no-referrer" />
+          : <div className="w-full h-full flex items-center justify-center text-zinc-400">Sem imagem</div>
+        }
+      </div>
+      {hasMultiple && (
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {allImages.map((url, i) => (
+            <button
+              key={`${url}-${i}`}
+              onClick={() => setActiveIdx(i)}
+              className={`shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-lg border-2 overflow-hidden transition-all ${
+                i === activeIdx
+                  ? 'border-red-500 ring-2 ring-red-200'
+                  : 'border-zinc-200 hover:border-zinc-400'
+              }`}
+              aria-label={`Imagem ${i + 1}`}
+            >
+              <img src={url} alt={`Thumb ${i + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProductAdBlock() {
   useEffect(() => {
     try { ((window as any).adsbygoogle = (window as any).adsbygoogle || []).push({}); } catch (_) {}
@@ -118,8 +173,13 @@ export default function ProductDetail() {
 
   const isColorValid = !requiresColor || colorMode === 'sortida' || selectedColors.length === maxColors;
 
+  // Estoque (2026-04-25 FRENTE 2)
+  const inStock = isProductAvailable(product);
+  const maxQty = maxCartQuantity(product);
+  const canPurchase = inStock && isColorValid && quantity <= maxQty;
+
   const handleAddToCart = () => {
-    if (isAdding || isBuying || !isColorValid) return;
+    if (isAdding || isBuying || !canPurchase) return;
     setIsAdding(true);
     const cp = buildColorPreference();
     for (let i = 0; i < quantity; i++) addToCart(product, cp);
@@ -127,7 +187,7 @@ export default function ProductDetail() {
   };
 
   const handleBuyNow = () => {
-    if (isAdding || isBuying || !isColorValid) return;
+    if (isAdding || isBuying || !canPurchase) return;
     setIsBuying(true);
     const cp = buildColorPreference();
     for (let i = 0; i < quantity; i++) addToCart(product, cp, false);
@@ -139,13 +199,9 @@ export default function ProductDetail() {
       <Breadcrumbs items={[{ label: product.title }]} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 bg-white p-5 sm:p-8 rounded-2xl shadow-sm border border-zinc-100">
-        {/* Imagem */}
-        <div className="aspect-square bg-zinc-50 rounded-xl overflow-hidden border border-zinc-100">
-          {product.image_url
-            ? <img src={product.image_url} alt={product.title} className="w-full h-full object-contain p-4" referrerPolicy="no-referrer" />
-            : <div className="w-full h-full flex items-center justify-center text-zinc-400">Sem imagem</div>
-          }
-        </div>
+        {/* Imagens (galeria) - 2026-04-25 FRENTE 3 */}
+        <ProductGallery product={product} />
+
 
         {/* Info */}
         <div className="flex flex-col">
@@ -245,27 +301,56 @@ export default function ProductDetail() {
 
           {/* Quantidade + Comprar */}
           <div ref={buttonsRef} className="space-y-3 mb-6">
+            {/* Badge de disponibilidade (2026-04-25 FRENTE 2) */}
+            {!inStock ? (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                <p className="text-sm font-semibold text-red-700">Produto esgotado no momento</p>
+              </div>
+            ) : product.unlimited_stock ? null : (product.stock !== null && product.stock !== undefined && product.stock <= 5) ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <p className="text-xs font-semibold text-amber-800">
+                  Ultimas {product.stock} unidade{product.stock === 1 ? '' : 's'} em estoque!
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <p className="text-xs font-medium text-emerald-700">Em estoque</p>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-zinc-700 mb-2">Quantidade</label>
               <div className="flex items-center w-32 bg-zinc-50 border border-zinc-200 rounded-xl">
-                <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-10 h-11 flex items-center justify-center text-zinc-500 hover:text-zinc-900 transition-colors">
+                <button onClick={() => setQuantity(Math.max(1, quantity - 1))} disabled={!inStock} className="w-10 h-11 flex items-center justify-center text-zinc-500 hover:text-zinc-900 transition-colors disabled:opacity-40">
                   <Minus size={16} />
                 </button>
                 <input type="number" value={quantity} readOnly className="w-12 h-11 bg-transparent text-center font-medium text-zinc-900 outline-none text-sm" />
-                <button onClick={() => setQuantity(quantity + 1)} className="w-10 h-11 flex items-center justify-center text-zinc-500 hover:text-zinc-900 transition-colors">
+                <button
+                  onClick={() => setQuantity(Math.min(quantity + 1, maxQty === Infinity ? quantity + 1 : maxQty))}
+                  disabled={!inStock || quantity >= maxQty}
+                  className="w-10 h-11 flex items-center justify-center text-zinc-500 hover:text-zinc-900 transition-colors disabled:opacity-40"
+                >
                   <Plus size={16} />
                 </button>
               </div>
+              {inStock && !product.unlimited_stock && product.stock !== null && product.stock !== undefined && quantity >= product.stock && (
+                <p className="text-[11px] text-amber-600 mt-1">Maximo disponivel: {product.stock}</p>
+              )}
             </div>
 
             {/* Comprar agora */}
-            <button onClick={handleBuyNow} disabled={isAdding || isBuying || !isColorValid}
+            <button onClick={handleBuyNow} disabled={isAdding || isBuying || !canPurchase}
               className={`w-full py-3.5 rounded-xl text-base font-bold transition-all shadow flex items-center justify-center gap-2 ${
-                !isColorValid ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed shadow-none'
+                !canPurchase ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed shadow-none'
                 : isBuying ? 'bg-red-700 text-white cursor-wait shadow-red-700/20'
                 : 'bg-red-600 text-white hover:bg-red-700 shadow-red-600/20'
               }`}>
-              {isBuying
+              {!inStock
+                ? 'Esgotado'
+                : isBuying
                 ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Indo para o carrinho…</>
                 : !isColorValid && requiresColor && colorMode === 'prioridade'
                   ? `Selecione ${maxColors - selectedColors.length} cor${maxColors - selectedColors.length > 1 ? 'es' : ''}`
@@ -274,13 +359,15 @@ export default function ProductDetail() {
             </button>
 
             {/* Adicionar ao carrinho */}
-            <button onClick={handleAddToCart} disabled={isAdding || isBuying || !isColorValid}
+            <button onClick={handleAddToCart} disabled={isAdding || isBuying || !canPurchase}
               className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 border ${
-                !isColorValid ? 'border-zinc-200 text-zinc-400 cursor-not-allowed'
+                !canPurchase ? 'border-zinc-200 text-zinc-400 cursor-not-allowed'
                 : isAdding ? 'border-red-200 bg-red-50 text-red-700 cursor-wait'
                 : 'border-zinc-300 text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50'
               }`}>
-              {isAdding
+              {!inStock
+                ? 'Esgotado'
+                : isAdding
                 ? <><div className="w-3.5 h-3.5 border-2 border-red-500 border-t-transparent rounded-full animate-spin" /> Adicionado!</>
                 : <><ShoppingCart size={15} /> Adicionar ao carrinho</>
               }
@@ -330,24 +417,28 @@ export default function ProductDetail() {
                 {quantity > 1 && <p className="text-[10px] text-zinc-400">x{quantity}</p>}
               </div>
               <div className="flex gap-2 flex-1 min-w-0">
-                <button onClick={handleAddToCart} disabled={isAdding || isBuying || !isColorValid}
+                <button onClick={handleAddToCart} disabled={isAdding || isBuying || !canPurchase}
                   className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5 border ${
-                    !isColorValid ? 'border-zinc-200 text-zinc-400 cursor-not-allowed'
+                    !canPurchase ? 'border-zinc-200 text-zinc-400 cursor-not-allowed'
                     : isAdding ? 'border-red-200 bg-red-50 text-red-700'
                     : 'border-zinc-300 text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50'
                   }`}>
-                  {isAdding
+                  {!inStock
+                    ? 'Esgotado'
+                    : isAdding
                     ? <><div className="w-3.5 h-3.5 border-2 border-red-500 border-t-transparent rounded-full animate-spin" /> Ok!</>
                     : <><ShoppingCart size={14} /> Carrinho</>
                   }
                 </button>
-                <button onClick={handleBuyNow} disabled={isAdding || isBuying || !isColorValid}
+                <button onClick={handleBuyNow} disabled={isAdding || isBuying || !canPurchase}
                   className={`flex-[1.3] py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    !isColorValid ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                    !canPurchase ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
                     : isBuying ? 'bg-red-700 text-white cursor-wait'
                     : 'bg-red-600 text-white hover:bg-red-700 shadow shadow-red-600/20'
                   }`}>
-                  {isBuying
+                  {!inStock
+                    ? 'Esgotado'
+                    : isBuying
                     ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processando…</>
                     : !isColorValid && requiresColor && colorMode === 'prioridade'
                       ? `Selecione ${maxColors - selectedColors.length} cor${maxColors - selectedColors.length > 1 ? 'es' : ''}`

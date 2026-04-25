@@ -43,15 +43,21 @@ export interface ParsedProduct extends ProductData {
   _shippingLength: number | null;
   _shippingWeight: number | null;
   _rank: number | null;
+  // Estoque (2026-04-25 FRENTE 2)
+  _unlimitedStock: boolean;
+  _stockQty: number | null;
 }
 
+// 2026-04-25 v2: dashboard reduzido a 3 caminhos (home, list, rank).
+// 'colors' e 'yards' foram removidos do menu inicial — as acoes em massa
+// de cores/jardas continuam acessiveis via selecao multipla na lista,
+// atraves do BulkActionSheet. Isso elimina duplicidade de fluxos.
 export type ViewMode =
-  | 'home'       // Dashboard inicial de ações
-  | 'list'       // Lista tradicional
-  | 'colors'     // Color Studio
-  | 'yards'      // Yard Studio
-  | 'rank'       // Rank Studio (lista reordenável)
-  | 'reorder';   // Reorder mode legado (apenas dentro do list)
+  | 'home'       // Dashboard inicial (3 botoes)
+  | 'list'       // Gerenciar Produtos (busca + filtros + bulk)
+  | 'rank'       // Ajustar Ranking
+  | 'reorder';   // Modo reordenar (interno)
+
 
 export type EditorTab = 'info' | 'images' | 'colors' | 'rank' | 'shipping';
 

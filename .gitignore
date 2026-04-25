@@ -9,3 +9,5 @@ coverage/
 backups/
 backups_phase_cpf_fix_20260330_144947/
 CPFLBOT_audit/
+tests/_tmp/
+tmp/

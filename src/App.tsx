@@ -257,15 +257,24 @@ function StoreLayout() {
       <AnalyticsTracker />
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 flex-grow w-full">
         <Routes>
-          {/* NOVA ENTRADA DA LOJA: StoreLanding como index de /store.
-              O Home.tsx continua existindo como catálogo completo em /store/catalogo. */}
-          <Route index element={<StoreLanding />} />
-          {/* Catálogo completo (antigo "Home" da loja) — agora em rota dedicada. */}
+          {/* =============================================
+              MODO MANUTENCAO PARCIAL (2026-04-25 v2)
+              Unica rota bloqueada aqui: /store (index puro)
+              Todo o resto esta liberado para teste.
+              ============================================= */}
+          <Route index element={<ComingSoon />} />
+          {/* Catalogo completo */}
           <Route path="catalogo" element={<Home />} />
           <Route path="product/:id" element={<ProductDetail />} />
           <Route path="cart" element={<Cart />} />
           <Route path="checkout" element={<Checkout />} />
           <Route path="acompanhar" element={<TrackOrder />} />
+          {/* Rotas de jarda */}
+          <Route path="nova-home" element={<StoreLanding />} />
+          <Route path="nova-home/jardas" element={<YardSelection />} />
+          <Route path="nova-home/:category" element={<CategoryCatalog />} />
+          <Route path="jardas/:yard" element={<YardCatalog />} />
+          {/* Rotas institucionais - LIBERADAS */}
           <Route path="sobre" element={<Sobre />} />
           <Route path="contato" element={<Contato />} />
           <Route path="politica-privacidade" element={<PoliticaPrivacidade />} />
@@ -274,15 +283,8 @@ function StoreLayout() {
           <Route path="frete-entrega" element={<FreteEntrega />} />
           <Route path="blog" element={<BlogList />} />
           <Route path="blog/:slug" element={<BlogPost />} />
-          {/* Alias legado: /store/nova-home continua apontando para StoreLanding
-              para não quebrar links internos (YardSelection, YardCatalog, CategoryCatalog). */}
-          <Route path="nova-home" element={<StoreLanding />} />
-          {/* Escolha de jarda — fluxo: landing -> jardas -> catalogo */}
-          <Route path="nova-home/jardas" element={<YardSelection />} />
-          {/* Catálogo por categoria — carretilhas e roupas-acessorios */}
-          <Route path="nova-home/:category" element={<CategoryCatalog />} />
-          {/* Catalogo filtrado por jarda — usado pelos botoes de jarda da landing */}
-          <Route path="jardas/:yard" element={<YardCatalog />} />
+          {/* Qualquer outra sub-rota desconhecida */}
+          <Route path="*" element={<ComingSoon />} />
         </Routes>
       </main>
       <Footer />
@@ -296,10 +298,13 @@ export default function App() {
       <Router>
         <Routes>
           {/* =============================================
-              MODO MANUTENÇÃO
-              - "/" e "/store/*" → ComingSoon
-              - "/store/admin/*" CONTINUA FUNCIONANDO normalmente
-                (admin precisa operar pedidos mesmo com o site fora).
+              MODO MANUTENCAO PARCIAL (2026-04-25 v2)
+              APENAS duas rotas bloqueadas:
+                - "/" (raiz)
+                - "/store" (index puro)
+              TUDO o resto liberado: catalogo, product, cart,
+              checkout, blog, sobre, contato, etc.
+              Admin continua funcionando normalmente.
               ============================================= */}
 
           {/* Admin routes under /store/admin - MUST be before /store/* */}
@@ -314,12 +319,15 @@ export default function App() {
             <Route path="historico" element={<AdminAuditoria />} />
           </Route>
 
-          {/* Página de manutenção: cobre "/", "/store" e "/store/qualquer-coisa" */}
-          <Route path="/" element={<ComingSoon />} />
-          <Route path="/store" element={<ComingSoon />} />
-          <Route path="/store/*" element={<ComingSoon />} />
+          {/* StoreLayout gerencia internamente quais sub-rotas estao liberadas.
+              /store (index) → ComingSoon
+              /store/catalogo, /store/cart, etc. → Liberados */}
+          <Route path="/store/*" element={<StoreLayout />} />
 
-          {/* Fallback de segurança: qualquer rota desconhecida também cai na manutenção */}
+          {/* Página de manutenção: cobre "/" e qualquer rota desconhecida */}
+          <Route path="/" element={<ComingSoon />} />
+
+          {/* Fallback de segurança */}
           <Route path="*" element={<ComingSoon />} />
         </Routes>
       </Router>

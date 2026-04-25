@@ -17,6 +17,7 @@ import { TabImages } from './TabImages';
 import { TabColors } from './TabColors';
 import { TabRank } from './TabRank';
 import { TabShipping } from './TabShipping';
+import { TabStock } from './TabStock';
 
 export interface EditorSavePayload {
   title: string;
@@ -33,6 +34,9 @@ export interface EditorSavePayload {
   rank: number | null;
   colors?: ColorItem[];
   isNew: boolean;
+  // Estoque (2026-04-25 FRENTE 2)
+  unlimited_stock: boolean;
+  stock_qty: number | null;
 }
 
 export function ProductEditor({
@@ -67,6 +71,14 @@ export function ProductEditor({
 
   const [rank, setRank] = useState<string>(
     product?._rank !== null && product?._rank !== undefined ? String(product._rank) : ''
+  );
+
+  // Estoque (2026-04-25 FRENTE 2)
+  const [unlimitedStock, setUnlimitedStock] = useState<boolean>(
+    product ? product._unlimitedStock : true
+  );
+  const [stockQty, setStockQty] = useState<string>(
+    product?._stockQty !== null && product?._stockQty !== undefined ? String(product._stockQty) : ''
   );
 
   const needsColorFromProduct = product ? product._needsColorSelection : false;
@@ -114,6 +126,41 @@ export function ProductEditor({
 
     const priceReais = centsToReais(priceCents);
 
+    // Imagens: so salvamos URLs REAIS (nao blobs locais nem imagens em upload ou com erro)
+    // FRENTE 3: impede salvar produto com imagens que ainda nao subiram
+    const uploadingImages = images.filter((i: any) => i._uploading);
+    const errorImages = images.filter((i: any) => i._error);
+    if (uploadingImages.length > 0) {
+      errs.push(`Aguarde ${uploadingImages.length} imagem(ns) terminar(em) o upload antes de salvar`);
+      setErrors(errs);
+      return;
+    }
+    if (errorImages.length > 0) {
+      errs.push(`${errorImages.length} imagem(ns) com erro de upload. Remova ou reenvie antes de salvar.`);
+      setErrors(errs);
+      return;
+    }
+    const validImageUrls = images
+      .map(i => i.url)
+      .filter(url => typeof url === 'string' && url.length > 0 && !url.startsWith('blob:'));
+
+    // Estoque: validar
+    let stockQtyFinal: number | null = null;
+    if (!unlimitedStock) {
+      if (stockQty.trim() === '') {
+        errs.push('Informe a quantidade em estoque ou marque "ilimitado"');
+        setErrors(errs);
+        return;
+      }
+      const n = Number(stockQty);
+      if (isNaN(n) || n < 0) {
+        errs.push('Quantidade em estoque deve ser >= 0');
+        setErrors(errs);
+        return;
+      }
+      stockQtyFinal = Math.floor(n);
+    }
+
     onSave({
       title: title.trim(),
       handle: handle.trim() || undefined,
@@ -124,11 +171,13 @@ export function ProductEditor({
       shipping_width: Number(shWidth) || null,
       shipping_length: Number(shLength) || null,
       shipping_weight: Number(shWeight) || null,
-      images: images.map(i => i.url),
+      images: validImageUrls,
       grupo: finalGroup,
       rank: rankValue,
       colors: colorChanged ? colors : undefined,
       isNew,
+      unlimited_stock: unlimitedStock,
+      stock_qty: stockQtyFinal,
     });
   };
 
@@ -237,6 +286,18 @@ export function ProductEditor({
               </section>
             </>
           )}
+
+          <hr className="border-zinc-200" />
+
+          <section>
+            <h3 className="text-lg font-bold text-zinc-900 mb-4">Estoque</h3>
+            <TabStock
+              unlimited={unlimitedStock}
+              setUnlimited={setUnlimitedStock}
+              stock={stockQty}
+              setStock={setStockQty}
+            />
+          </section>
 
           <hr className="border-zinc-200" />
 

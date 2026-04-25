@@ -5,6 +5,9 @@ const CART_STORAGE_KEY = 'ddt_cart';
 const SHIPPING_OPTIONS_KEY = 'ddt_shipping_options';
 const SELECTED_SHIPPING_KEY = 'ddt_selected_shipping';
 const CART_CEP_KEY = 'ddt_cart_cep';
+// 2026-04-25 FIX CAIXA IDEAL: guardamos o payload EXATO enviado a Superfrete
+// para persistir junto do pedido (audit + etiqueta).
+const SHIPPING_QUOTE_PRODUCTS_KEY = 'ddt_shipping_quote_products';
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
@@ -51,6 +54,14 @@ interface CartContextType {
   setShippingCartFingerprint: (fp: string) => void;
   /** True when the cached shipping quote no longer matches the current cart */
   isShippingStale: boolean;
+  /**
+   * 2026-04-25 FIX CAIXA IDEAL
+   * Payload `products[]` EXATO que foi enviado a Superfrete na cotacao.
+   * Eh o que persistimos em order_shipping_box.products_sent_json para
+   * auditoria e para garantir que a etiqueta saia com as MESMAS dimensoes.
+   */
+  shippingQuoteProducts: any[] | null;
+  setShippingQuoteProducts: (products: any[] | null) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -65,6 +76,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(() => loadFromStorage(SELECTED_SHIPPING_KEY, null));
   const [cartCep, setCartCep] = useState<string>(() => loadFromStorage(CART_CEP_KEY, ''));
   const [shippingCartFingerprint, setShippingCartFingerprint] = useState<string>(() => loadFromStorage(SHIPPING_FINGERPRINT_KEY, ''));
+  const [shippingQuoteProducts, setShippingQuoteProducts] = useState<any[] | null>(() => loadFromStorage(SHIPPING_QUOTE_PRODUCTS_KEY, null));
 
   // Compute once – is the cached shipping quote stale relative to the current cart?
   const currentFingerprint = cartFingerprint(cart);
@@ -100,6 +112,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => { saveToStorage(SELECTED_SHIPPING_KEY, selectedShipping); }, [selectedShipping]);
   useEffect(() => { saveToStorage(CART_CEP_KEY, cartCep); }, [cartCep]);
   useEffect(() => { saveToStorage(SHIPPING_FINGERPRINT_KEY, shippingCartFingerprint); }, [shippingCartFingerprint]);
+  useEffect(() => { saveToStorage(SHIPPING_QUOTE_PRODUCTS_KEY, shippingQuoteProducts); }, [shippingQuoteProducts]);
 
   // ─── Invalidate shipping when cart items/quantities change ───
   const prevFingerprintRef = useRef(currentFingerprint);
@@ -158,12 +171,14 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     setSelectedShipping(null);
     setCartCep('');
     setShippingCartFingerprint('');
+    setShippingQuoteProducts(null);
     try {
       localStorage.removeItem(CART_STORAGE_KEY);
       localStorage.removeItem(SHIPPING_OPTIONS_KEY);
       localStorage.removeItem(SELECTED_SHIPPING_KEY);
       localStorage.removeItem(CART_CEP_KEY);
       localStorage.removeItem(SHIPPING_FINGERPRINT_KEY);
+      localStorage.removeItem(SHIPPING_QUOTE_PRODUCTS_KEY);
     } catch {}
   };
 
@@ -179,7 +194,8 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
         selectedShipping, setSelectedShipping,
         cartCep, setCartCep,
         shippingCartFingerprint, setShippingCartFingerprint,
-        isShippingStale
+        isShippingStale,
+        shippingQuoteProducts, setShippingQuoteProducts
       }}
     >
       {children}

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import { Trash2, Plus, Minus, Truck, Loader2, MapPin, AlertCircle, RefreshCw } from 'lucide-react';
 import { api } from '../api';
-import { LINE_COLORS } from '../types';
+import { LINE_COLORS, isProductAvailable, maxCartQuantity } from '../types';
 
 export default function Cart() {
   const {
@@ -12,7 +12,8 @@ export default function Cart() {
     selectedShipping, setSelectedShipping,
     cartCep, setCartCep,
     shippingCartFingerprint, setShippingCartFingerprint,
-    isShippingStale
+    isShippingStale,
+    setShippingQuoteProducts,
   } = useCart();
   const navigate = useNavigate();
 
@@ -37,10 +38,34 @@ export default function Cart() {
     try {
       const res = await api.calculateShipping(cleanCep, cartItems);
       if (res.success && res.options && Array.isArray(res.options)) {
-        // FIX 2026-04-24: Normalize ideal box to the shape backend expects:
-        //   { dimensions: { height, width, length }, weight, format }
-        // Prefer per-service packages[0], fall back to top-level ideal_package.
+        // FIX 2026-04-25 CAIXA IDEAL:
+        //   - Capturamos a `ideal_package` FLAT que a Superfrete retornou para
+        //     cada servico (veio do backend em option.ideal_package). Eh esse
+        //     valor que precisa ser enviado ao criar o pedido para que
+        //     order_shipping_box tenha as dimensoes reais da caixa.
+        //   - Tambem guardamos o `products_sent` (payload exato enviado a
+        //     Superfrete) para auditoria.
         const topIdeal = res.ideal_package || null;
+        const normalizeIdealFlat = (opt: any): any => {
+          // Backend ja calcula e devolve option.ideal_package em formato flat.
+          const src =
+            opt.ideal_package ||
+            (opt.packages && opt.packages[0] ? {
+              height: opt.packages[0].dimensions?.height ?? opt.packages[0].height,
+              width:  opt.packages[0].dimensions?.width  ?? opt.packages[0].width,
+              length: opt.packages[0].dimensions?.length ?? opt.packages[0].length,
+              weight: opt.packages[0].weight,
+              format: opt.packages[0].format,
+            } : null) ||
+            topIdeal;
+          if (!src) return null;
+          const h = Number(src.height);
+          const w = Number(src.width);
+          const l = Number(src.length);
+          const kg = Number(src.weight);
+          if (!(h > 0) || !(w > 0) || !(l > 0) || !(kg > 0)) return null;
+          return { height: h, width: w, length: l, weight: kg, format: src.format || 'box' };
+        };
         const normalizePkg = (raw: any) => {
           if (!raw) return null;
           const h = Number(raw.height) || null;
@@ -61,11 +86,16 @@ export default function Cart() {
             price: parseFloat(opt.price),
             delivery_time: opt.delivery_time,
             package: normalizePkg(opt.packages?.[0]) || normalizePkg(topIdeal),
+            // 2026-04-25 FIX CAIXA IDEAL: guardamos FLAT tambem
+            ideal_package: normalizeIdealFlat(opt),
           }))
           .filter((opt: any) => opt.price > 0);
 
         setShippingOptions(options);
         setCartCep(cleanCep);
+        // Products_sent eh o mesmo para todos os servicos (foi uma unica
+        // chamada). Guardamos no Context para usar na hora de criar o pedido.
+        setShippingQuoteProducts(Array.isArray(res.products_sent) ? res.products_sent : null);
 
         // Record the fingerprint so we know this quote matches the current cart
         const fp = cartItems
@@ -86,14 +116,16 @@ export default function Cart() {
         setShippingError(res.error || 'Nao foi possivel calcular o frete para este CEP.');
         setShippingOptions([]);
         setSelectedShipping(null);
+        setShippingQuoteProducts(null);
       }
     } catch {
       setShippingError('Erro ao calcular frete.');
+      setShippingQuoteProducts(null);
     } finally {
       setLoadingShipping(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setShippingOptions, setCartCep, setShippingCartFingerprint, setSelectedShipping]);
+  }, [setShippingOptions, setCartCep, setShippingCartFingerprint, setSelectedShipping, setShippingQuoteProducts]);
 
   // ── Track whether CEP is complete and valid for button state ──
   const cleanCepNow = cep.replace(/\D/g, '');
@@ -153,9 +185,30 @@ export default function Cart() {
   // ── Manual "OK" button handler ─────────────────────────────────
   const handleCalculateShipping = () => calculateShipping(cep, cart);
 
+  // ── Estoque: checar itens do carrinho (2026-04-25 FRENTE 2) ───
+  // Bloqueia prosseguir se ha item esgotado ou com quantidade maior que disponivel.
+  const stockIssues = cart.reduce<string[]>((acc, item) => {
+    if (!isProductAvailable(item)) {
+      acc.push(`"${item.title}" esta esgotado`);
+      return acc;
+    }
+    const max = maxCartQuantity(item);
+    if (Number.isFinite(max) && item.quantity > max) {
+      acc.push(`"${item.title}": somente ${max} disponivel${max === 1 ? '' : 'eis'}`);
+    }
+    return acc;
+  }, []);
+  const hasStockIssues = stockIssues.length > 0;
+
   // ── Proceed to checkout ────────────────────────────────────────
   const handleProceed = () => {
     setValidationMsg('');
+
+    // Bloqueio por estoque (FRENTE 2)
+    if (hasStockIssues) {
+      setValidationMsg('stock');
+      return;
+    }
 
     // Still recalculating
     if (loadingShipping) {
@@ -328,7 +381,15 @@ export default function Cart() {
               </button>
             </div>
             
-            {shippingError && <p className="text-red-500 text-xs mt-2">CEP invalido. Verifique e tente novamente.</p>}
+            {/* 2026-04-25: Mostra o erro REAL do backend/validacao em vez de
+                assumir que toda falha e "CEP invalido". Antes a UI dizia
+                sempre "CEP invalido" mesmo quando o erro era de dimensao
+                de produto — o que confundia o cliente. */}
+            {shippingError && (
+              <p className="text-red-500 text-xs mt-2">
+                {shippingError}
+              </p>
+            )}
 
             {/* Recalculating indicator */}
             {loadingShipping && shippingOptions.length > 0 && (
@@ -437,10 +498,25 @@ export default function Cart() {
               </p>
             </div>
           )}
+          {/* FRENTE 2: alerta de estoque */}
+          {(validationMsg === 'stock' || hasStockIssues) && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5">
+              <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+              <div className="text-sm text-red-800 font-medium space-y-1">
+                <p>Nao e possivel prosseguir:</p>
+                <ul className="list-disc ml-4 font-normal">
+                  {stockIssues.map((msg, i) => <li key={i}>{msg}</li>)}
+                </ul>
+                <p className="text-xs font-normal">
+                  Ajuste a quantidade ou remova o item.
+                </p>
+              </div>
+            </div>
+          )}
 
           <button
             onClick={handleProceed}
-            disabled={shouldDisableProceed}
+            disabled={shouldDisableProceed || hasStockIssues}
             className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loadingShipping ? (

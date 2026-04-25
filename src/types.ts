@@ -7,6 +7,7 @@ export interface Product {
   vendor: string;
   price: number;
   image_url: string;
+  images?: string[];
   yards: number | null;
   variant_id?: string;
   metadata?: Record<string, any>;
@@ -16,6 +17,27 @@ export interface Product {
     length: number;
     weight: number;
   };
+  // Estoque (2026-04-25 FRENTE 2)
+  stock?: number | null;
+  unlimited_stock?: boolean;
+}
+
+// Helper central para saber se um produto esta disponivel para compra.
+// Regra: unlimited_stock=true → sempre disponivel. Caso contrario, stock>0.
+// Se stock for null/undefined → tratamos como disponivel (compatibilidade com
+// produtos antigos que ainda nao tem o campo salvo).
+export function isProductAvailable(p: Pick<Product, 'stock' | 'unlimited_stock'>): boolean {
+  if (p.unlimited_stock === true) return true;
+  if (p.stock === null || p.stock === undefined) return true;
+  return Number(p.stock) > 0;
+}
+
+// Quantidade maxima que pode ser colocada no carrinho para esse produto.
+// Retorna Infinity para ilimitado ou para produtos sem campo de estoque definido.
+export function maxCartQuantity(p: Pick<Product, 'stock' | 'unlimited_stock'>): number {
+  if (p.unlimited_stock === true) return Infinity;
+  if (p.stock === null || p.stock === undefined) return Infinity;
+  return Math.max(0, Number(p.stock));
 }
 
 export type ColorMode = 'sortida' | 'prioridade';
@@ -181,5 +203,17 @@ export interface ShippingOption {
   name: string;
   price: number;
   delivery_time: number;
+  // Package legado no formato { dimensions: { h, w, l }, weight, format }
+  // (compat com metadata.package_dimensions antigo).
   package: any;
+  // 2026-04-25 FIX CAIXA IDEAL: formato FLAT retornado pela Superfrete,
+  // exatamente do jeito que o backend /store/shipping-quote devolve.
+  // Salvamos isso para enviar de volta ao criar o pedido.
+  ideal_package?: {
+    weight: number;
+    height: number;
+    width: number;
+    length: number;
+    format: string;
+  } | null;
 }

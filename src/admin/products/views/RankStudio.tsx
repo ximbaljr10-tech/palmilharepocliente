@@ -7,11 +7,28 @@
 import React, { useMemo, useState } from 'react';
 import {
   ArrowLeft, TrendingUp, ChevronRight, ListOrdered,
-  Ruler, Tag, LayoutGrid, Search, Flame, Medal,
+  Ruler, Tag, Search, Flame, Medal,
 } from 'lucide-react';
 import type { ParsedProduct } from '../types';
 
 type RankScope = 'all' | 'group' | 'yard';
+
+// 2026-04-25: persistir scope+busca entre navegacoes.
+// Quando o operador volta ao RankStudio apos editar um produto, o scope
+// e a busca ficam como estavam — nao precisa refazer filtros.
+const RANK_SCOPE_KEY = 'ddt_admin_rank_scope';
+const RANK_SEARCH_KEY = 'ddt_admin_rank_search';
+
+function loadScope(): RankScope {
+  try {
+    const v = localStorage.getItem(RANK_SCOPE_KEY);
+    if (v === 'group' || v === 'yard' || v === 'all') return v;
+  } catch {}
+  return 'group';
+}
+function loadSearch(): string {
+  try { return localStorage.getItem(RANK_SEARCH_KEY) || ''; } catch { return ''; }
+}
 
 export interface RankStudioProps {
   products: ParsedProduct[];
@@ -20,8 +37,17 @@ export interface RankStudioProps {
 }
 
 export function RankStudio({ products, onBack, onOpenReorder }: RankStudioProps) {
-  const [scope, setScope] = useState<RankScope>('group');
-  const [search, setSearch] = useState('');
+  const [scope, setScopeState] = useState<RankScope>(() => loadScope());
+  const [search, setSearchState] = useState(() => loadSearch());
+
+  const setScope = (s: RankScope) => {
+    setScopeState(s);
+    try { localStorage.setItem(RANK_SCOPE_KEY, s); } catch {}
+  };
+  const setSearch = (v: string) => {
+    setSearchState(v);
+    try { localStorage.setItem(RANK_SEARCH_KEY, v); } catch {}
+  };
 
   // Produtos publicados para fluxo de destaque (Home).
   // Para "Em Alta / Top 3" pegamos apenas publicados — faz sentido na loja.
@@ -115,22 +141,9 @@ export function RankStudio({ products, onBack, onOpenReorder }: RankStudioProps)
         <ChevronRight size={18} className="shrink-0 text-white/80" />
       </button>
 
-      {/* Atalho: reordenar tudo */}
-      <button
-        onClick={() => onOpenReorder(products, 'Todos os produtos')}
-        className="w-full bg-zinc-900 text-white rounded-2xl p-3 flex items-center gap-3 hover:bg-zinc-800 active:scale-[0.99]"
-      >
-        <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-          <LayoutGrid size={18} />
-        </div>
-        <div className="min-w-0 flex-1 text-left">
-          <p className="text-sm font-bold">Reordenar TUDO</p>
-          <p className="text-[11px] text-white/70 truncate">
-            Todos os {products.length} produtos juntos (inclui rascunhos)
-          </p>
-        </div>
-        <ChevronRight size={18} className="shrink-0 text-white/70" />
-      </button>
+      {/* 2026-04-25: removido botao "Reordenar TUDO" — nao fazia sentido
+          ordenar rascunhos junto com publicados. O usuario escolhe por
+          grupo ou por jarda abaixo. */}
 
       {/* Scope switcher */}
       <div className="flex gap-1.5">

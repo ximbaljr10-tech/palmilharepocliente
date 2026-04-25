@@ -2,6 +2,13 @@
 // All API calls go through Nginx reverse proxy (same origin)
 // Nginx proxies /store/, /admin/, /auth/, /health to Medusa on port 9000
 
+import {
+  getShippingDefaults,
+  validateShippingDimensions,
+  extractYardsFromTitle,
+  type ShippingDimensions,
+} from './shippingDefaults';
+
 // Auto-detect Medusa URL based on current host
 // In production: frontend and API are on the same host via Nginx (port 80)
 // In development: API is on localhost:9000
@@ -64,39 +71,66 @@ async function medusaAuth(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
-// Shipping dimensions by yards - accurate SuperFrete measurements
-function getShippingByYards(yards: number | null, title: string): { height: number; width: number; length: number; weight: number } {
-  // Check for carretilha (reel) in title
-  if (title && /carretilha/i.test(title)) {
-    return { height: 25, width: 33, length: 31, weight: 1.0 };
+// ============================================================================
+// Shipping defaults: usa FONTE UNICA de shippingDefaults.ts
+// ZERO tabelas duplicadas. ZERO calculo local.
+// ============================================================================
+
+// ============================================================================
+// URL NORMALIZATION (2026-04-25 FIX IMAGENS)
+// ============================================================================
+// O provider file-local do Medusa retorna URLs absolutas tipo
+// http://localhost:9000/static/<filename>. Essa URL NAO funciona no browser
+// do cliente porque 'localhost' aponta para a propria maquina dele.
+// Normalizamos para path relativo /static/<filename>, que o nginx proxya
+// diretamente para o Medusa na porta 9000.
+function normalizeImageUrl(url: any): string {
+  if (!url || typeof url !== 'string') return '';
+  if (url.startsWith('/')) return url;
+  try {
+    const u = new URL(url);
+    // URLs de upload do Medusa: qualquer host apontando para /static/
+    if (u.pathname.startsWith('/static/')) {
+      return u.pathname + (u.search || '');
+    }
+  } catch (_err) {
+    // url invalida - deixa como esta
   }
-  switch (yards) {
-    case 50:   return { height: 12, width: 12, length: 12, weight: 0.2 };
-    case 100:  return { height: 12, width: 12, length: 12, weight: 0.2 };
-    case 200:  return { height: 12, width: 12, length: 12, weight: 0.2 };
-    case 500:  return { height: 12, width: 12, length: 19, weight: 0.4 };
-    case 600:  return { height: 12, width: 18, length: 18, weight: 0.3 };
-    case 1000: return { height: 15, width: 15, length: 18, weight: 0.5 };
-    case 2000: return { height: 18, width: 18, length: 19, weight: 1.0 };
-    case 3000: return { height: 18, width: 18, length: 27, weight: 1.0 };
-    case 6000: return { height: 19, width: 19, length: 25, weight: 2.0 };
-    case 12000: return { height: 21, width: 21, length: 30, weight: 3.0 };
-    default:   return { height: 12, width: 12, length: 12, weight: 0.2 };
-  }
+  return url;
 }
 
 // Map Medusa product to our frontend format
+// 2026-04-25: Usa shippingDefaults.ts centralizado com validacao rigorosa.
+// NUNCA retorna null/0/undefined em dimensoes de frete.
 function mapMedusaProduct(p: any) {
   const variant = p.variants?.[0];
   const price = variant?.calculated_price?.calculated_amount || 0;
   const metadata = p.metadata || {};
-  const image = p.images?.[0]?.url || p.thumbnail || "";
+  const rawImage = p.images?.[0]?.url || p.thumbnail || "";
+  const image = normalizeImageUrl(rawImage);
+  const images = (p.images || [])
+    .map((img: any) => normalizeImageUrl(img?.url))
+    .filter(Boolean);
 
   // Extract yards from title
-  const yardsMatch = p.title?.match(/(\d+)\s*(j|jds|jardas)\b/i);
-  const yards = yardsMatch ? parseInt(yardsMatch[1], 10) : (metadata.yards || null);
+  const yards = extractYardsFromTitle(p.title || '') ?? (metadata.yards || null);
 
-  const shipping = getShippingByYards(yards, p.title || '');
+  // Buscar dimensoes do metadata (fonte primaria) e validar contra shippingDefaults
+  const validation = validateShippingDimensions(
+    {
+      height: metadata.shipping_height,
+      width: metadata.shipping_width,
+      length: metadata.shipping_length,
+      weight: metadata.shipping_weight,
+    },
+    p.title || '',
+    yards,
+  );
+
+  // Log warnings em dev para auditoria
+  if (validation.warnings.length > 0 && typeof window !== 'undefined') {
+    console.warn(`[mapMedusaProduct] "${p.title}": ${validation.warnings.join('; ')}`);
+  }
 
   return {
     id: p.id,
@@ -107,15 +141,21 @@ function mapMedusaProduct(p: any) {
     vendor: p.subtitle || metadata.vendor || "Dente de Tubarão",
     price: price,
     image_url: image,
+    images: images,
     yards: yards,
     variant_id: variant?.id,
     metadata: metadata,
-    shipping: {
-      height: metadata.shipping_height || shipping.height,
-      width: metadata.shipping_width || shipping.width,
-      length: metadata.shipping_length || shipping.length,
-      weight: metadata.shipping_weight || shipping.weight,
-    },
+    // GARANTIA: dimensoes SEMPRE validas (>= 1cm, >= 0.1kg)
+    shipping: validation.dimensions,
+    // Estoque (2026-04-25 FRENTE 2)
+    unlimited_stock: metadata.unlimited_stock === true,
+    stock: (metadata.unlimited_stock === true)
+      ? null
+      : (typeof metadata.stock_qty === 'number'
+          ? Math.max(0, Math.floor(metadata.stock_qty))
+          : (typeof metadata.stock_qty === 'string' && metadata.stock_qty.trim() !== '' && !isNaN(Number(metadata.stock_qty))
+              ? Math.max(0, Math.floor(Number(metadata.stock_qty)))
+              : null)),
   };
 }
 
@@ -358,56 +398,71 @@ export const api = {
 
   // ============ SHIPPING (SuperFrete via Medusa backend) ============
   //
-  // AUDIT 2026-04-24 (v2 — fix cálculo frete):
-  //   - Agora enviamos SEMPRE `products[]` (array de produtos individuais)
-  //     para o backend, nunca `package`. A SuperFrete calcula a caixa ideal.
-  //   - Lemos dimensões na ORDEM CORRETA:
-  //       1. metadata.width_cm / height_cm / length_cm / weight_kg (fonte real,
-  //          é onde o admin cadastra os valores)
-  //       2. campos normalizados (`height`, `width`, `length`, `weight`)
-  //       3. legado (`shipping_height`, etc.)
-  //       4. fallback seguro (12x12x19, 0.3kg)
-  //   - `cache: "no-store"` para garantir que o cálculo é sempre fresco.
-  //   - O backend retorna a `package` ideal calculada pela SuperFrete junto
-  //     com cada opção de serviço, para ser persistida no pedido.
+  // 2026-04-25 v3 — ZERO calculo local. Validacao rigorosa via shippingDefaults.ts.
+  //   - Envia SEMPRE `products[]` para o backend → Superfrete calcula caixa ideal
+  //   - Dimensoes vem do campo `shipping` do produto (ja validado em mapMedusaProduct)
+  //   - Se shipping estiver invalido → bloqueia com erro (nao envia lixo pra Superfrete)
+  //   - ZERO fallback oculto. Tudo visivel e auditavel.
   calculateShipping: async (cep: string, items: any[]) => {
     try {
-      const products = items.map((item) => {
-        const meta = item.metadata || {};
-        const shipping = item.shipping || {};
-        // Pick the first numeric, positive value from the candidates, else fallback
-        const pick = (candidates: any[], min: number, fallback: number) => {
-          for (const v of candidates) {
-            const n = Number(v);
-            if (Number.isFinite(n) && n > 0) return Math.max(min, n);
-          }
-          return fallback;
-        };
-        return {
-          quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
-          height: pick(
-            [meta.height_cm, shipping.shipping_height, shipping.height, item.height],
-            1, 12
-          ),
-          width: pick(
-            [meta.width_cm, shipping.shipping_width, shipping.width, item.width],
-            1, 12
-          ),
-          length: pick(
-            [meta.length_cm, shipping.shipping_length, shipping.length, item.length],
-            1, 19
-          ),
-          weight: pick(
-            [meta.weight_kg, shipping.shipping_weight, shipping.weight, item.weight],
-            0.01, 0.3
-          ),
-        };
-      });
+      // Validar CADA produto antes de enviar
+      const products: Array<{ quantity: number; height: number; width: number; length: number; weight: number }> = [];
+      const validationErrors: string[] = [];
 
-      // Debug log (visible in browser devtools) — helps auditing quickly
+      for (const item of items) {
+        const shipping = item.shipping || {};
+        const title = item.title || '';
+        const yards = item.yards ?? extractYardsFromTitle(title);
+
+        // Validacao rigorosa usando shippingDefaults.ts
+        const result = validateShippingDimensions(
+          {
+            height: shipping.height,
+            width: shipping.width,
+            length: shipping.length,
+            weight: shipping.weight,
+          },
+          title,
+          yards,
+        );
+
+        if (!result.valid) {
+          validationErrors.push(
+            `"${title}": ${result.errors.join(', ')}`
+          );
+          continue;
+        }
+
+        if (result.warnings.length > 0) {
+          console.warn(`[calculateShipping] "${title}": ${result.warnings.join('; ')}`);
+        }
+
+        products.push({
+          quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
+          height: result.dimensions.height,
+          width: result.dimensions.width,
+          length: result.dimensions.length,
+          weight: result.dimensions.weight,
+        });
+      }
+
+      // Se algum produto falhou validacao, bloqueia o calculo
+      if (validationErrors.length > 0) {
+        console.error('[calculateShipping] BLOQUEADO - produtos com dimensoes invalidas:', validationErrors);
+        return {
+          success: false,
+          error: `Produto(s) com dimensoes de frete invalidas. Contate o suporte.`,
+          validation_errors: validationErrors,
+        };
+      }
+
+      if (products.length === 0) {
+        return { success: false, error: 'Nenhum produto valido para calcular frete.' };
+      }
+
+      // Debug log (visible in browser devtools)
+      // Enable with: window.__DDT_DEBUG_SHIPPING__ = true
       if (typeof window !== "undefined" && (window as any).__DDT_DEBUG_SHIPPING__) {
-        // Enable with:  window.__DDT_DEBUG_SHIPPING__ = true
-        // eslint-disable-next-line no-console
         console.log("[calculateShipping] →", { cep, products });
       }
 
@@ -425,14 +480,13 @@ export const api = {
       const data = await res.json();
 
       if (typeof window !== "undefined" && (window as any).__DDT_DEBUG_SHIPPING__) {
-        // eslint-disable-next-line no-console
         console.log("[calculateShipping] ←", data);
       }
 
       return data;
     } catch (error) {
-      console.error("Erro no cálculo de frete:", error);
-      return { success: false, error: "Não foi possível calcular o frete." };
+      console.error("Erro no calculo de frete:", error);
+      return { success: false, error: "Nao foi possivel calcular o frete." };
     }
   },
 

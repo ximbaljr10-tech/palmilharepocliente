@@ -32,7 +32,7 @@ function formatCPFInput(value: string): string {
 }
 
 export default function Checkout() {
-  const { cart, total, clearCart, selectedShipping, setSelectedShipping, setShippingOptions, shippingOptions, cartCep } = useCart();
+  const { cart, total, clearCart, selectedShipping, setSelectedShipping, setShippingOptions, shippingOptions, cartCep, shippingQuoteProducts } = useCart();
   const navigate = useNavigate();
   const [step, setStep] = useState<'form' | 'pix'>('form');
   const [loadingCep, setLoadingCep] = useState(false);
@@ -315,6 +315,11 @@ export default function Checkout() {
           color_preference: item.color_preference || undefined,
         })), totalAmount: total, shipping_service: selectedShipping?.id,
         shipping_fee: selectedShipping?.price, package_dimensions: selectedShipping?.package,
+        // 2026-04-25 FIX CAIXA IDEAL - envia FLAT + payload original
+        // para que o backend persista em order_shipping_box e depois use
+        // na geracao da etiqueta.
+        ideal_package: selectedShipping?.ideal_package || null,
+        shipping_quote_products: shippingQuoteProducts || null,
       });
       
       if (data.success) {

@@ -83,6 +83,20 @@ export function parseProduct(p: ProductData): ParsedProduct {
 
   const stock = variant?.inventory_quantity ?? null;
 
+  // Estoque (2026-04-25 FRENTE 2) — armazenado em metadata para nao depender
+  // do sistema de inventory do Medusa (que nao esta configurado aqui).
+  // metadata.unlimited_stock (bool): true = sempre disponivel
+  // metadata.stock_qty (number): quantidade disponivel. Se 0 = esgotado.
+  const unlimitedStock = metadata.unlimited_stock === true;
+  const rawStockQty = metadata.stock_qty;
+  const stockQty = unlimitedStock
+    ? null
+    : (typeof rawStockQty === 'number' && !isNaN(rawStockQty))
+      ? Math.max(0, Math.floor(rawStockQty))
+      : (typeof rawStockQty === 'string' && rawStockQty.trim() !== '' && !isNaN(Number(rawStockQty)))
+        ? Math.max(0, Math.floor(Number(rawStockQty)))
+        : null;
+
   const fakeProduct = { title, handle: p.handle, yards, metadata } as any;
   const colorGroup = getColorGroupName(fakeProduct);
   const needsColor = needsColorSelection(fakeProduct);
@@ -131,5 +145,7 @@ export function parseProduct(p: ProductData): ParsedProduct {
     _shippingLength: metadata.shipping_length || defaultShipping.length,
     _shippingWeight: metadata.shipping_weight || defaultShipping.weight,
     _rank: rank,
+    _unlimitedStock: unlimitedStock,
+    _stockQty: stockQty,
   };
 }

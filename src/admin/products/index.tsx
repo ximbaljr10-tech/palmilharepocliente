@@ -8,8 +8,16 @@
 //   /hooks       → useProducts, useBulkActions, useProductSave, useToast
 //   /components  → Atômicos (ColorDot, StatusDot, ProductCard, ActionRow…)
 //   /views       → Telas completas (HomeDashboard, ProductListView,
-//                  ColorStudio, YardStudio, RankStudio, Bulk*Modal,
-//                  ReorderMode, editor/*)
+//                  RankStudio, Bulk*Modal, ReorderMode, editor/*)
+//
+// 2026-04-25 v2 (UX reduzida a 3 caminhos):
+//   HomeDashboard oferece apenas:
+//     1. Adicionar Produto  - editor em branco
+//     2. Ajustar Ranking    - RankStudio
+//     3. Gerenciar Produtos - ProductListView (lista + bulk)
+//   ColorStudio e YardStudio foram removidos do menu. Edicao de cores e
+//   jardas continua possivel individualmente (TabColors no editor) e em
+//   massa via selecao multipla -> BulkActionSheet.
 //
 // Regras:
 // - Não toca em API nem em nenhum arquivo fora deste diretório.
@@ -32,14 +40,24 @@ import type { ParsedProduct, ViewMode } from './types';
 //   1. F5 não perde a tela atual.
 //   2. Botão voltar do navegador volta pra view anterior.
 //   3. URL pode ser compartilhada: /store/admin/produtos?view=rank
+//
+// 2026-04-25 v2: dashboard reduzido — apenas list/rank/reorder sao validos.
+// Se alguem chegar com ?view=colors ou ?view=yards (URL antiga), cai em 'list',
+// pois as acoes de cores/jardas agora vivem dentro do Bulk Action Sheet.
 // ============================================================================
-const VALID_VIEWS: ViewMode[] = ['home', 'list', 'colors', 'yards', 'rank', 'reorder'];
+const VALID_VIEWS: ViewMode[] = ['home', 'list', 'rank', 'reorder'];
+const LEGACY_REDIRECTS: Record<string, ViewMode> = {
+  colors: 'list',
+  yards:  'list',
+};
 
 function readViewFromURL(): ViewMode {
   if (typeof window === 'undefined') return 'home';
   try {
     const p = new URLSearchParams(window.location.search).get('view');
-    if (p && (VALID_VIEWS as string[]).includes(p)) return p as ViewMode;
+    if (!p) return 'home';
+    if ((VALID_VIEWS as string[]).includes(p)) return p as ViewMode;
+    if (LEGACY_REDIRECTS[p]) return LEGACY_REDIRECTS[p];
   } catch (_) {}
   return 'home';
 }
@@ -68,8 +86,9 @@ import { BulkActionSheet } from './components/BulkActionSheet';
 
 import { HomeDashboard } from './views/HomeDashboard';
 import { ProductListView } from './views/ProductListView';
-import { ColorStudio } from './views/ColorStudio';
-import { YardStudio } from './views/YardStudio';
+// 2026-04-25 v2: ColorStudio / YardStudio removidos do menu.
+// Acoes em massa de cor e jarda continuam disponiveis via Bulk Action Sheet
+// (selecionar multiplos produtos na lista e clicar em "Acoes em massa").
 import { RankStudio } from './views/RankStudio';
 import { ReorderMode } from './views/ReorderMode';
 import { BulkStatusModal } from './views/BulkStatusModal';
@@ -138,9 +157,12 @@ export default function AdminProducts() {
   const [showBulkRank, setShowBulkRank] = useState(false);
   const [quickBulkAction, setQuickBulkAction] = useState<'add' | 'remove' | null>(null);
 
-  // ---- Scoped bulk actions (quando vem do ColorStudio/YardStudio) ----
-  // Guarda os produtos "alvo" da próxima ação em massa quando o usuário
-  // dispara direto de uma view especializada (sem precisar selecionar).
+  // ---- Scoped bulk actions ----
+  // Historicamente guardava os produtos "alvo" de uma acao em massa quando
+  // disparada de uma view especializada (ColorStudio/YardStudio). Hoje (v2)
+  // ambas foram removidas, entao este slot fica sempre null e as acoes em
+  // massa usam a selecao da lista. Mantido por compatibilidade dos modais
+  // (que continuam chamando setScopedProducts(null) ao fechar).
   const [scopedProducts, setScopedProducts] = useState<ParsedProduct[] | null>(null);
 
   // ------------------------ Editor ------------------------
@@ -181,10 +203,45 @@ export default function AdminProducts() {
   }, [scopedProducts, products, selectedIds]);
 
   // ------------------------ Handlers ------------------------
+  // 2026-04-25 v2 PERSISTENCIA DE LUGAR:
+  // Antes: ao salvar, o editor fechava automaticamente (setEditingProduct(undefined))
+  // — o usuario perdia o contexto da edicao e era jogado de volta na lista.
+  //
+  // Agora: ao salvar com sucesso, MANTEMOS o editor aberto. O operador escolhe
+  // quando sair (botao X). Se for um produto NOVO, recarregamos a lista e
+  // trocamos o editingProduct para o produto recem-criado (assim ele continua
+  // editando o mesmo produto ao inves de ficar num formulario "novo" vazio).
   const handleProductSave = useCallback(async (data: any) => {
     const success = await saveProduct(data, editingProduct ?? null);
-    if (success) setEditingProduct(undefined);
-  }, [saveProduct, editingProduct]);
+    if (!success) return;
+
+    // Produto novo: aguardar reload e mudar editingProduct para o salvo,
+    // identificado pelo title+handle (que sao unicos na pratica).
+    if (data.isNew) {
+      // O hook useProductSave ja chama reload() internamente. Aguardamos um
+      // ciclo para que `products` (do hook useProducts) seja atualizado, e
+      // tentamos achar o produto recem-criado pelo title.
+      setTimeout(() => {
+        // products aqui pode estar stale — usamos uma busca defensiva com retries
+        const tryFind = (attempt: number) => {
+          const found = products.find(p =>
+            p.title === data.title || p.handle === data.handle
+          );
+          if (found) {
+            setEditingProduct(found);
+          } else if (attempt < 3) {
+            setTimeout(() => tryFind(attempt + 1), 400);
+          } else {
+            // Nao achou em 3 tentativas — fecha mesmo (caso extremo).
+            setEditingProduct(undefined);
+          }
+        };
+        tryFind(0);
+      }, 300);
+    }
+    // Produto existente: editor permanece aberto com os mesmos campos
+    // (ja salvos). O operador clica em X quando quiser sair.
+  }, [saveProduct, editingProduct, products]);
 
   const closeAllBulkModals = useCallback(() => {
     setShowBulkSheet(false);
@@ -224,43 +281,11 @@ export default function AdminProducts() {
     setReorderState(null);
   }, [bulk]);
 
-  // Atalhos para views especializadas chamarem ações
-  const scopedOpenBulkColors = useCallback((scope: ParsedProduct[]) => {
-    setScopedProducts(scope);
-    setShowBulkColors(true);
-  }, []);
-  const scopedOpenQuickAdd = useCallback((scope: ParsedProduct[]) => {
-    setScopedProducts(scope);
-    setQuickBulkAction('add');
-  }, []);
-  const scopedOpenQuickRemove = useCallback((scope: ParsedProduct[]) => {
-    setScopedProducts(scope);
-    setQuickBulkAction('remove');
-  }, []);
-  const scopedOpenBulkRank = useCallback((scope: ParsedProduct[]) => {
-    setScopedProducts(scope);
-    setShowBulkRank(true);
-  }, []);
-  const scopedOpenBulkStatus = useCallback((scope: ParsedProduct[]) => {
-    setScopedProducts(scope);
-    setShowBulkStatus(true);
-  }, []);
-  const scopedOpenReorder = useCallback((scope: ParsedProduct[], label: string) => {
-    setReorderState({ products: scope, label: `Ordenar: ${label}` });
-  }, []);
-
-  // Yard action dispatcher
-  const handleYardAction = useCallback(
-    (items: ParsedProduct[], action: 'edit_colors' | 'bulk_rank' | 'bulk_status' | 'reorder') => {
-      switch (action) {
-        case 'edit_colors': scopedOpenBulkColors(items); break;
-        case 'bulk_rank':   scopedOpenBulkRank(items); break;
-        case 'bulk_status': scopedOpenBulkStatus(items); break;
-        case 'reorder':     scopedOpenReorder(items, items[0]?._yards ? `${items[0]._yards} jardas` : 'Jarda'); break;
-      }
-    },
-    [scopedOpenBulkColors, scopedOpenBulkRank, scopedOpenBulkStatus, scopedOpenReorder]
-  );
+  // 2026-04-25 v2: Atalhos "scoped*" e handleYardAction removidos.
+  // Eles so eram chamados por ColorStudio/YardStudio, que foram retirados
+  // do menu. Hoje toda acao em massa parte de uma SELECAO explicita na
+  // ProductListView, passando pelo BulkActionSheet \u2192 modais. Isso elimina
+  // duas fontes de comportamento concorrentes (sem escopo vs com escopo).
 
   // ------------------------ Reorder full-screen tem prioridade ------------------------
   if (reorderState) {
@@ -316,26 +341,6 @@ export default function AdminProducts() {
           selectAll={selectAllIds}
           onOpenBulkSheet={() => setShowBulkSheet(true)}
           hasSelection={selectedIds.size > 0}
-        />
-      )}
-
-      {view === 'colors' && (
-        <ColorStudio
-          products={products}
-          onBack={() => setView('home')}
-          onEditGroup={scopedOpenBulkColors}
-          onQuickAdd={scopedOpenQuickAdd}
-          onQuickRemove={scopedOpenQuickRemove}
-          onEditProduct={(p) => setEditingProduct(p)}
-        />
-      )}
-
-      {view === 'yards' && (
-        <YardStudio
-          products={products}
-          onBack={() => setView('home')}
-          onEditProduct={(p) => setEditingProduct(p)}
-          onYardAction={handleYardAction}
         />
       )}
 

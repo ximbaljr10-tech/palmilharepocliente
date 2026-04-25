@@ -21,6 +21,9 @@ export interface ProductSavePayload {
   rank: number | null;
   colors?: any[];
   isNew: boolean;
+  // Estoque (2026-04-25 FRENTE 2)
+  unlimited_stock: boolean;
+  stock_qty: number | null;
 }
 
 interface SaveDeps {
@@ -45,6 +48,13 @@ export function useProductSave({ showToast, reload }: SaveDeps) {
           if (data.grupo) metadataPayload.grupo = data.grupo;
           if (data.colors && data.colors.length > 0) metadataPayload.available_colors = data.colors;
           if (data.rank !== null && data.rank !== undefined) metadataPayload.rank = data.rank;
+          // Estoque (FRENTE 2)
+          metadataPayload.unlimited_stock = data.unlimited_stock;
+          if (!data.unlimited_stock) {
+            metadataPayload.stock_qty = data.stock_qty ?? 0;
+          } else {
+            metadataPayload.stock_qty = null;
+          }
 
           const result = await adminFetch('/admin/produtos-custom', {
             method: 'POST',
@@ -86,6 +96,13 @@ export function useProductSave({ showToast, reload }: SaveDeps) {
         if (data.grupo) metadataUpdate.grupo = data.grupo;
         if (data.colors !== undefined) metadataUpdate.available_colors = data.colors;
         metadataUpdate.rank = data.rank;
+        // Estoque (FRENTE 2)
+        metadataUpdate.unlimited_stock = data.unlimited_stock;
+        if (!data.unlimited_stock) {
+          metadataUpdate.stock_qty = data.stock_qty ?? 0;
+        } else {
+          metadataUpdate.stock_qty = null;
+        }
 
         const updatePayload: any = {
           title: data.title,

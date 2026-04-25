@@ -1,13 +1,14 @@
 // ============================================================================
 // HomeDashboard - TELA INICIAL de Produtos
-// Mostra CAMINHOS claros (o usuário escolhe o que quer fazer) em vez de
-// despejar uma lista confusa de produtos.
+// 2026-04-25 v2: Reduzido a 3 opcoes (Adicionar / Ajustar Ranking / Gerenciar)
+// Removido: Gerenciar Cores e Gerenciar por Jardas (duplicavam filtros).
+// "Ver Lista Completa" renomeado para "Gerenciar Produtos".
 // ============================================================================
 
 import React from 'react';
 import {
-  PlusCircle, ListOrdered, Palette, TrendingUp, Ruler, LayoutGrid,
-  ChevronRight, Package, Eye, EyeOff, AlertTriangle, Loader2,
+  PlusCircle, TrendingUp, LayoutGrid,
+  ChevronRight, Package, EyeOff, AlertTriangle, Loader2,
 } from 'lucide-react';
 import { StatTile } from '../components/Pills';
 import type { ParsedProduct, ViewMode } from '../types';
@@ -30,17 +31,11 @@ interface HomeDashboardProps {
 }
 
 export function HomeDashboard({
-  stats, loading, products, onNavigate, onNewProduct,
+  stats, loading, onNavigate, onNewProduct,
 }: HomeDashboardProps) {
-  // Extrai jardas únicas para Yard Studio
-  const yardsCount = new Set(
-    products.filter(p => p._yards !== null).map(p => p._yards)
-  ).size;
-  const groupsCount = new Set(products.map(p => p._group)).size;
-
   return (
     <div className="space-y-3 pb-10">
-      {/* Stats rápidas */}
+      {/* Stats rapidas */}
       <div className="grid grid-cols-4 gap-1.5">
         <StatTile label="Total" value={stats.total} tone="zinc" />
         <StatTile label="Pub" value={stats.published} tone="emerald" />
@@ -55,18 +50,9 @@ export function HomeDashboard({
         </div>
       )}
 
-      {/* Alertas automáticos que direcionam o usuário */}
-      {!loading && (stats.noColors > 0 || stats.outOfStock > 0 || stats.draft > 0) && (
+      {/* Alertas automaticos - so mostram o que EXISTE e direcionam ao Gerenciar Produtos */}
+      {!loading && (stats.outOfStock > 0 || stats.draft > 0) && (
         <div className="space-y-1.5">
-          {stats.noColors > 0 && (
-            <AlertCard
-              tone="purple"
-              icon={<Palette size={16} />}
-              title={`${stats.noColors} produto(s) sem cores`}
-              subtitle="Adicione cores em massa com poucos cliques"
-              onClick={() => onNavigate('colors')}
-            />
-          )}
           {stats.outOfStock > 0 && (
             <AlertCard
               tone="red"
@@ -88,7 +74,7 @@ export function HomeDashboard({
         </div>
       )}
 
-      {/* Ação principal: criar novo */}
+      {/* Acao principal: criar novo */}
       <button
         onClick={onNewProduct}
         className="w-full bg-gradient-to-br from-emerald-500 to-emerald-600 text-white rounded-2xl p-4 flex items-center gap-3 shadow-sm hover:shadow-md active:scale-[0.99] transition-all"
@@ -105,28 +91,12 @@ export function HomeDashboard({
         <ChevronRight size={18} className="shrink-0 text-white/80" />
       </button>
 
-      {/* Caminhos especializados - cada um leva a uma ferramenta focada */}
+      {/* 2 caminhos especializados - apenas o essencial */}
       <div>
         <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 px-1">
           O que voce quer fazer?
         </p>
         <div className="space-y-1.5">
-          <PathCard
-            icon={<Palette size={20} />}
-            tone="purple"
-            title="Gerenciar Cores"
-            subtitle={`Ajustar cores de varios produtos de uma vez (${stats.noColors > 0 ? stats.noColors + ' sem cor' : 'visao por grupos'})`}
-            hint="Ideal para ajustar linhas e estoques de cor"
-            onClick={() => onNavigate('colors')}
-          />
-          <PathCard
-            icon={<Ruler size={20} />}
-            tone="blue"
-            title="Gerenciar por Jardas"
-            subtitle={`Agrupar por jardas (${yardsCount} jardas diferentes)`}
-            hint="Trabalhar com uma jarda especifica"
-            onClick={() => onNavigate('yards')}
-          />
           <PathCard
             icon={<TrendingUp size={20} />}
             tone="amber"
@@ -138,19 +108,19 @@ export function HomeDashboard({
           <PathCard
             icon={<LayoutGrid size={20} />}
             tone="zinc"
-            title="Ver Lista Completa"
+            title="Gerenciar Produtos"
             subtitle={`Buscar, filtrar e editar (${stats.total} produtos)`}
-            hint="Modo tradicional com todos os filtros"
+            hint="Selecione em massa, edite, publique"
             onClick={() => onNavigate('list')}
           />
         </div>
       </div>
 
-      {/* Rodapé informativo */}
+      {/* Rodape informativo */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5 text-[11px] text-blue-900 flex items-start gap-2">
         <Package size={13} className="shrink-0 mt-0.5 text-blue-500" />
         <div className="min-w-0">
-          <strong>Dica:</strong> Cada caminho acima e focado numa tarefa. Se voce so quer mexer em cores, escolha "Gerenciar Cores" — a selecao em massa fica mais simples.
+          <strong>Dica:</strong> Em "Gerenciar Produtos" voce consegue filtrar por publicados/rascunhos, buscar e selecionar varios para acoes em massa (cores, jarda, status).
         </div>
       </div>
     </div>
