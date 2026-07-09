@@ -16,10 +16,15 @@ import fitz
 import os
 import re
 import json
+import sys
 
 SRC = "input/Prestacao_de_Contas_Inventarianca_PDF_clicavel.pdf"
-RECIBOS = "input/recibos"
-OUT = "output/Prestacao_de_Contas_Inventarianca_ANEXOS_NAVEGAVEL.pdf"
+RECIBOS = sys.argv[1] if len(sys.argv) > 1 else "input/recibos_otimizados"
+OUT = sys.argv[2] if len(sys.argv) > 2 else \
+    "output/Prestacao_de_Contas_Inventarianca_ANEXOS_NAVEGAVEL.pdf"
+# intervalo opcional de anexos (p/ dividir em partes): min max
+NUM_MIN = int(sys.argv[3]) if len(sys.argv) > 3 else None
+NUM_MAX = int(sys.argv[4]) if len(sys.argv) > 4 else None
 
 os.makedirs("output", exist_ok=True)
 
@@ -63,6 +68,10 @@ for f in sorted(os.listdir(RECIBOS)):
         file_by_num[n] = f
 
 nums_sorted = sorted(file_by_num.keys(), key=sort_key)
+
+if NUM_MIN is not None:
+    nums_sorted = [n for n in nums_sorted
+                   if NUM_MIN <= int(re.match(r"\d+", n).group()) <= NUM_MAX]
 
 # ---------------------------------------------------------------------------
 # 3. Anexar páginas (uma por documento; PDFs multipágina = várias páginas)
@@ -157,4 +166,6 @@ doc.save(OUT, garbage=4, deflate=True)
 print(f"OK  paginas originais: {n_orig}  finais: {len(doc)}")
 print(f"links redirecionados p/ ancoras internas: {replaced}  mantidos (URI): {kept}")
 print(f"anexos inseridos: {len(report)}")
+size_mb = os.path.getsize(OUT) / 1024 / 1024
+print(f"arquivo: {OUT}  ->  {size_mb:.2f} MB")
 json.dump({"report": report}, open("output/report.json", "w"))
